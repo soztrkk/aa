@@ -14,6 +14,9 @@ from blocks.preprocessing import (
     HandleMissingValuesBlock,
     RemoveDuplicatesBlock,
     HandleOutliersBlock,
+    DropColumnsBlock,
+    RenameColumnsBlock,
+    ConvertDtypeBlock
 )
 # asagidaki satirlar, ileride eklenecek bloklar icin simdilik yorum satiri halinde birakildi
 # from blocks.encoding_scaling import NormalizeBlock, EncodeCategoricalBlock
@@ -29,6 +32,9 @@ BLOCK_REGISTRY = {
     "handle_missing_values": HandleMissingValuesBlock,
     "remove_duplicates": RemoveDuplicatesBlock,
     "handle_outliers": HandleOutliersBlock,
+    "drop_columns": DropColumnsBlock,
+    "rename_columns":RenameColumnsBlock,
+    "convert_dtype": ConvertDtypeBlock,
     # "normalize": NormalizeBlock,
     # "train_test_split": TrainTestSplitBlock,
 }
