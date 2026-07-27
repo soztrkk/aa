@@ -1,0 +1,13 @@
+age,income,city,gender,purchased
+25,45000,Ankara,Male,1
+30,54000,Istanbul,Female,0
+,62000,Izmir,Female,1
+40,,Ankara,Male,0
+28,48000,,Female,1
+35,71000,Istanbul,Male,
+22,39000,Ankara,Female,0
+45,,Izmir,Male,1
+30,54000,Istanbul,Female,0
+30,54000,Istanbul,Female,0
+50,88000,Ankara,Male,1
+,,,,
