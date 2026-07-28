@@ -62,3 +62,52 @@ print("Response 6 (delete_node):", response6)
 # get_meta testi: silinen bir node'un ref'i artik bulunamamali (hata bekleniyor)
 response7 = handle_message({"op": "get_meta", "ref": response4["outputs"]["output"]["ref"]})
 print("Response 7 (hata bekleniyor):", response7)
+
+# Data Preview testi
+msg8 = {
+    "op": "run_block",
+    "node_id": "node_8",
+    "block": "data_preview",
+    "params": {
+        "row_count": 5,
+        "preview_type": "head"
+    },
+    "inputs": {
+        "data": response2["outputs"]["output"]["ref"]
+    }
+}
+
+response8 = handle_message(msg8)
+print("Response 8 (data preview):", response8)
+
+# Dataset Summary testi
+msg9 = {
+    "op": "run_block",
+    "node_id": "node_9",
+    "block": "dataset_summary",
+    "params": {},
+    "inputs": {
+        "data": response2["outputs"]["output"]["ref"]
+    }
+}
+
+response9 = handle_message(msg9)
+print("Response 9 (dataset summary):", response9)
+
+
+# Histogram testi
+msg10 = {
+    "op": "run_block",
+    "node_id": "node_10",
+    "block": "plot_histogram",
+    "params": {
+        "column": "age",
+        "bins": 10
+    },
+    "inputs": {
+        "data": response2["outputs"]["output"]["ref"]
+    }
+}
+
+response10 = handle_message(msg10)
+print("Response 10 (histogram):", response10)

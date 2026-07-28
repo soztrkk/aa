@@ -15,6 +15,20 @@ from blocks.preprocessing import (
     RemoveDuplicatesBlock,
     HandleOutliersBlock,
 )
+from blocks.view_blocks import (
+    DataPreviewBlock,
+    DatasetSummaryBlock,
+    DescribeStatisticsBlock,
+    MissingValuesReportBlock,
+    DuplicateRowsReportBlock,
+    DataTypesSummaryBlock,
+    PlotHistogramBlock,
+    PlotBarChartBlock,
+    PlotBoxplotBlock,
+    PlotScatterBlock,
+    PlotCorrelationHeatmapBlock,
+    PlotMissingValuesBlock,
+)
 # asagidaki satirlar, ileride eklenecek bloklar icin simdilik yorum satiri halinde birakildi
 # from blocks.encoding_scaling import NormalizeBlock, EncodeCategoricalBlock
 # from blocks.splitting import TrainTestSplitBlock
@@ -29,10 +43,20 @@ BLOCK_REGISTRY = {
     "handle_missing_values": HandleMissingValuesBlock,
     "remove_duplicates": RemoveDuplicatesBlock,
     "handle_outliers": HandleOutliersBlock,
-    # "normalize": NormalizeBlock,
-    # "train_test_split": TrainTestSplitBlock,
-}
 
+    "data_preview": DataPreviewBlock,
+    "dataset_summary": DatasetSummaryBlock,
+    "describe_statistics": DescribeStatisticsBlock,
+    "missing_values_report": MissingValuesReportBlock,
+    "duplicate_rows_report": DuplicateRowsReportBlock,
+    "data_types_summary": DataTypesSummaryBlock,
+    "plot_histogram": PlotHistogramBlock,
+    "plot_bar_chart": PlotBarChartBlock,
+    "plot_boxplot": PlotBoxplotBlock,
+    "plot_scatter": PlotScatterBlock,
+    "plot_correlation_heatmap": PlotCorrelationHeatmapBlock,
+    "plot_missing_values": PlotMissingValuesBlock,
+}
 
 # Factory (uretici) fonksiyon: blok ismi ve parametreleri alip, hazir bir blok objesi doner
 def create_block(block_name: str, params: dict):
