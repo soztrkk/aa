@@ -2,6 +2,7 @@ from typing import Any
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
+import json
 
 
 def _validate_dataframe(data: pd.DataFrame) -> None: 
@@ -13,9 +14,27 @@ def _validate_dataframe(data: pd.DataFrame) -> None:
     if data.empty:
         raise ValueError("Gönderilen veri seti boş.")
 
+def _dataframe_to_records(
+    data: pd.DataFrame
+) -> list[dict[str, Any]]:
+    """DataFrame'i JSON uyumlu kayıt listesine dönüştürür."""
+
+    return json.loads(
+        data.to_json(
+            orient="records",
+            date_format="iso"
+        )
+    )
+
 
 def _validate_column(data: pd.DataFrame, column: str) -> None:
     """Sütunun veri setinde bulunup bulunmadığını kontrol eder."""
+
+    if not isinstance(column, str):
+        raise TypeError("Sütun adı metin olmalıdır.")
+
+    if not column.strip():
+        raise ValueError("Sütun adı boş olamaz.")
 
     if column not in data.columns:
         raise ValueError(f"'{column}' isimli sütun veri setinde bulunamadı.")
@@ -32,8 +51,7 @@ def _figure_result(
         "output_type": "chart",
         "chart_type": chart_type,
         "title": title,
-        "figure": figure,
-        "figure_json": figure.to_json()
+        "figure_json": figure.to_json() #Plotly Figure, Python'a ait bir 
     }
 
 
@@ -52,8 +70,16 @@ def data_preview(
 
     _validate_dataframe(data)
 
+    if not isinstance(row_count, int):
+        raise TypeError("Satır sayısı tam sayı olmalıdır.")
+
     if row_count <= 0:
         raise ValueError("Satır sayısı 0'dan büyük olmalıdır.")
+
+    if not isinstance(preview_type, str):
+        raise TypeError("preview_type metin olmalıdır.")
+
+    preview_type = preview_type.strip().lower()
 
     if preview_type == "head":
         preview_data = data.head(row_count)
@@ -66,7 +92,7 @@ def data_preview(
         "output_type": "table",
         "title": "Data Preview",
         "columns": preview_data.columns.tolist(),
-        "records": preview_data.to_dict(orient="records"),
+        "records": _dataframe_to_records(preview_data),
         "row_count": len(preview_data)
     }
 
@@ -117,7 +143,7 @@ def describe_statistics(data: pd.DataFrame) -> dict[str, Any]:
         "output_type": "table",
         "title": "Descriptive Statistics",
         "columns": statistics.columns.tolist(),
-        "records": statistics.to_dict(orient="records")
+        "records": _dataframe_to_records(statistics)
     }
 
 def missing_values_report(data: pd.DataFrame) -> dict[str, Any]:
@@ -176,6 +202,9 @@ def duplicate_rows_report(
 
     _validate_dataframe(data)
 
+    if not isinstance(max_rows, int):
+        raise TypeError("Gösterilecek maksimum satır sayısı tam sayı olmalıdır.")
+
     if max_rows <= 0:
         raise ValueError("Gösterilecek maksimum satır sayısı 0'dan büyük olmalıdır.")
 
@@ -196,7 +225,7 @@ def duplicate_rows_report(
         "output_type": "table",
         "title": "Duplicate Rows Report",
         "columns": displayed_rows.columns.tolist(),
-        "records": displayed_rows.to_dict(orient="records"),
+        "records": _dataframe_to_records(displayed_rows),
         "duplicate_row_count": int(data.duplicated().sum()),
         "matched_row_count": len(duplicate_rows),
         "displayed_row_count": len(displayed_rows),
@@ -218,16 +247,19 @@ def data_types_summary(data: pd.DataFrame) -> dict[str, Any]:
 
         dtype = data[column].dtype
 
-        if pd.api.types.is_numeric_dtype(dtype):
-            numeric_columns.append(column)
+        if pd.api.types.is_bool_dtype(dtype):
+            boolean_columns.append(column)
 
         elif pd.api.types.is_datetime64_any_dtype(dtype):
             datetime_columns.append(column)
 
-        elif pd.api.types.is_bool_dtype(dtype):
-            boolean_columns.append(column)
+        elif pd.api.types.is_numeric_dtype(dtype):
+            numeric_columns.append(column)
 
-        elif pd.api.types.is_object_dtype(dtype):
+        elif (
+            pd.api.types.is_object_dtype(dtype)
+            or str(dtype) == "category"
+        ):
             categorical_columns.append(column)
 
         else:
@@ -268,29 +300,36 @@ def data_types_summary(data: pd.DataFrame) -> dict[str, Any]:
 def plot_histogram(
     data: pd.DataFrame,
     column: str,
-    bins: int = 20 # Histogram kaç parçaya bölünsün?
+    bins: int = 20
 ) -> dict[str, Any]:
     """Seçilen sayısal sütun için histogram oluşturur."""
 
     _validate_dataframe(data)
     _validate_column(data, column)
 
+    if not isinstance(bins, int):
+        raise TypeError("Histogram kutu sayısı tam sayı olmalıdır.")
+
+    if bins <= 0:
+        raise ValueError("Histogram kutu sayısı 0'dan büyük olmalıdır.")
+
     if not pd.api.types.is_numeric_dtype(data[column]):
         raise TypeError("Histogram için sayısal bir sütun seçilmelidir.")
+
+    title = f"{column.title()} Distribution"
 
     figure = px.histogram(
         data,
         x=column,
-        nbins=bins, # Kutu sayısını ayarlar.
-        title=f"{column} Distribution"
+        nbins=bins,
+        title=title
     )
 
     return _figure_result(
         figure=figure,
-        title=f"{column} Distribution",
+        title=title,
         chart_type="histogram"
     )
-
 
 def plot_bar_chart(
     data: pd.DataFrame,
@@ -301,6 +340,12 @@ def plot_bar_chart(
 
     _validate_dataframe(data)
     _validate_column(data, column)
+
+    if not isinstance(top_n, int):
+        raise TypeError("Gösterilecek değer sayısı tam sayı olmalıdır.")
+
+    if top_n <= 0:
+        raise ValueError("Gösterilecek değer sayısı 0'dan büyük olmalıdır.")
 
     value_counts = (
         data[column]
