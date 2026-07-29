@@ -14,7 +14,13 @@ from blocks.preprocessing import (
     HandleMissingValuesBlock,
     RemoveDuplicatesBlock,
     HandleOutliersBlock,
+    DropColumnsBlock,
+    RenameColumnsBlock,
+    ConvertDtypeBlock
 )
+from blocks.encoding_scaling import EncodeCategoricalBlock, ScaleFeaturesBlock
+from blocks.data_preparation import ToTensorBlock, CreateDataLoaderBlock
+from blocks.mlp import MLPLearnerBlock
 from blocks.view_blocks import (
     DataPreviewBlock,
     DatasetSummaryBlock,
@@ -30,7 +36,6 @@ from blocks.view_blocks import (
     PlotMissingValuesBlock,
 )
 # asagidaki satirlar, ileride eklenecek bloklar icin simdilik yorum satiri halinde birakildi
-# from blocks.encoding_scaling import NormalizeBlock, EncodeCategoricalBlock
 # from blocks.splitting import TrainTestSplitBlock
 # (yeni bloklar eklendikce buraya yeni import satirlari eklenecek)
 
@@ -43,6 +48,15 @@ BLOCK_REGISTRY = {
     "handle_missing_values": HandleMissingValuesBlock,
     "remove_duplicates": RemoveDuplicatesBlock,
     "handle_outliers": HandleOutliersBlock,
+    "drop_columns": DropColumnsBlock,
+    "rename_columns":RenameColumnsBlock,
+    "convert_dtype": ConvertDtypeBlock,
+    "encode_categorical": EncodeCategoricalBlock,
+    "scale_features": ScaleFeaturesBlock,
+    "to_tensor": ToTensorBlock,
+    "create_dataloader": CreateDataLoaderBlock,
+    "mlp_learner": MLPLearnerBlock,
+    # "train_test_split": TrainTestSplitBlock,
 
     "data_preview": DataPreviewBlock,
     "dataset_summary": DatasetSummaryBlock,
