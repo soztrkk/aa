@@ -18,8 +18,11 @@ from blocks.preprocessing import (
     RenameColumnsBlock,
     ConvertDtypeBlock
 )
+from blocks.encoding_scaling import EncodeCategoricalBlock, ScaleFeaturesBlock
+from blocks.data_preparation import ToTensorBlock, CreateDataLoaderBlock
+from blocks.mlp import MLPLearnerBlock
 # asagidaki satirlar, ileride eklenecek bloklar icin simdilik yorum satiri halinde birakildi
-# from blocks.encoding_scaling import NormalizeBlock, EncodeCategoricalBlock
+# from blocks.encoding_scaling import NormalizeBlock
 # from blocks.splitting import TrainTestSplitBlock
 # (yeni bloklar eklendikce buraya yeni import satirlari eklenecek)
 
@@ -35,6 +38,11 @@ BLOCK_REGISTRY = {
     "drop_columns": DropColumnsBlock,
     "rename_columns":RenameColumnsBlock,
     "convert_dtype": ConvertDtypeBlock,
+    "encode_categorical": EncodeCategoricalBlock,
+    "scale_features": ScaleFeaturesBlock,
+    "to_tensor": ToTensorBlock,
+    "create_dataloader": CreateDataLoaderBlock,
+    "mlp_learner": MLPLearnerBlock,
     # "normalize": NormalizeBlock,
     # "train_test_split": TrainTestSplitBlock,
 }
