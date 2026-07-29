@@ -111,3 +111,44 @@ msg10 = {
 
 response10 = handle_message(msg10)
 print("Response 10 (histogram):", response10)
+
+# Train-Test Split testi
+msg11 = {
+    "op": "run_block",
+    "node_id": "node_11",
+    "block": "train_test_split",
+    "params": {
+        "train_ratio": 0.8,
+        "shuffle": True,
+        "random_seed": 42
+    },
+    "inputs": {
+        "data": response3["outputs"]["output"]["ref"]
+    }
+}
+
+response11 = handle_message(msg11)
+print("Response 11 (train-test split):", response11)
+
+# Train-Validation-Test Split testi
+msg12 = {
+    "op": "run_block",
+    "node_id": "node_12",
+    "block": "train_validation_test_split",
+    "params": {
+        "train_ratio": 0.6,
+        "validation_ratio": 0.2,
+        "test_ratio": 0.2,
+        "shuffle": True,
+        "random_seed": 42
+    },
+    "inputs": {
+        "data": response3["outputs"]["output"]["ref"]
+    }
+}
+
+response12 = handle_message(msg12)
+print(
+    "Response 12 (train-validation-test split):",
+    response12
+)

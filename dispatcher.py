@@ -19,6 +19,8 @@ def handle_message(msg: dict) -> dict:
         "inputs": {"data": "node_2:output"}   # slot_adi -> ref string'i
     }
     """
+    # İlk olarak gelen mesajdan bilgileri al
+
     op = msg.get("op")
 
     if op == "run_block":

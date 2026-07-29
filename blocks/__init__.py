@@ -35,6 +35,14 @@ from blocks.view_blocks import (
     PlotCorrelationHeatmapBlock,
     PlotMissingValuesBlock,
 )
+from blocks.splitting import (
+    TrainTestSplitBlock,
+    TrainValidationTestSplitBlock,
+)
+from blocks.logistic_regression import (
+    LogisticRegressionLearnerBlock,
+    LogisticRegressionPredictorBlock,
+)
 # asagidaki satirlar, ileride eklenecek bloklar icin simdilik yorum satiri halinde birakildi
 # from blocks.splitting import TrainTestSplitBlock
 # (yeni bloklar eklendikce buraya yeni import satirlari eklenecek)
@@ -70,6 +78,12 @@ BLOCK_REGISTRY = {
     "plot_scatter": PlotScatterBlock,
     "plot_correlation_heatmap": PlotCorrelationHeatmapBlock,
     "plot_missing_values": PlotMissingValuesBlock,
+
+    "train_test_split": TrainTestSplitBlock,
+    "train_validation_test_split": TrainValidationTestSplitBlock,
+
+    "logistic_regression_learner": LogisticRegressionLearnerBlock,
+    "logistic_regression_predictor": LogisticRegressionPredictorBlock,
 }
 
 # Factory (uretici) fonksiyon: blok ismi ve parametreleri alip, hazir bir blok objesi doner
