@@ -1,0 +1,12 @@
+# Python
+__pycache__/
+*.pyc
+
+# C++ derleme ciktilari (c_client) - kaynak kod commit edilir, .exe edilmez
+c_client/*.exe
+
+# ImGui'nin calisma zamaninda otomatik olusturdugu pencere/layout ayar dosyasi
+imgui.ini
+
+# Editor
+.vscode/
