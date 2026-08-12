@@ -79,7 +79,11 @@ REM basmadan aninda cikiyor (Windows STATUS_INVALID_IMAGE_FORMAT / 0xC000007B).
 REM Bu bayraklar MSYS2'nin C++ runtime'ini exe'nin ICINE gomerek bu bagimliligi
 REM tamamen ortadan kaldirir - gui_client.exe herhangi bir Windows makinesinde
 REM ekstra DLL/PATH ayari gerekmeden calisir.
-%GUI_GXX% -std=c++11 -Wall -O2 -DIMGUI_DEFINE_MATH_OPERATORS ^
+REM -pthread: GuiApp artik "Calistir" butonunda std::thread kullaniyor
+REM (egitim gibi uzun suren bloklar UI'yi kilitlemesin diye, bkz. gui_app.h
+REM basindaki THREAD MODELI aciklamasi) - MinGW-w64'te std::thread'in duzgun
+REM calismasi icin bu bayrak guvenlik payi olarak ekleniyor.
+%GUI_GXX% -std=c++11 -Wall -O2 -pthread -DIMGUI_DEFINE_MATH_OPERATORS ^
     -I third_party/imgui -I third_party/imgui/backends -I third_party/imnodes ^
     json_value.cpp ^
     python_process.cpp ^

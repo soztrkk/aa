@@ -1,9 +1,11 @@
 # dispatcher.py
 
 import sys
+import os
 import json
 from session_store import SessionStore
 from blocks import create_block
+from blocks.graphs_and_views import data_preview
 
 store = SessionStore()
 
@@ -37,9 +39,19 @@ def handle_message(msg: dict) -> dict:
             except ValueError as e:
                 return {"status": "error", "node_id": node_id, "message": str(e)}
 
+        # egitim gibi uzun suren bloklar icin: run() SURERKEN (orn. her epoch
+        # sonunda) block.report_progress(...) cagrilirsa, bu HEMEN (nihai
+        # sonuc donmeden ONCE) bir "status":"progress" satiri olarak C
+        # tarafina yollanir. report_progress hic cagrilmazsa (bloklarin
+        # cogunlugu) burasi hic calismaz, davranis eskisiyle birebir ayni.
+        def emit_progress(payload: dict) -> None:
+            progress_msg = {"status": "progress", "node_id": node_id}
+            progress_msg.update(payload)
+            print(json.dumps(progress_msg), flush=True)
+
         try:
             block = create_block(block_name, params)
-            result = block.execute(inputs)
+            result = block.execute(inputs, progress_cb=emit_progress)
         except Exception as e:
             return {"status": "error", "node_id": node_id, "message": str(e)}
 
@@ -78,6 +90,42 @@ def handle_message(msg: dict) -> dict:
             "columns": data.columns.tolist() if hasattr(data, "columns") else None,
         }
         return {"status": "ok", "ref": ref, "meta": meta}
+
+    elif op == "get_preview":
+        # GUI'nin bir node calistiktan sonra OTOMATIK gostermek istedigi
+        # "ilk N satir" onizlemesi - hicbir node/blok calistirmiyor, sadece
+        # var olan bir ref'in ustunde data_preview'i (bkz.
+        # blocks/graphs_and_views.py) dogrudan cagiriyor. Buyuk veri (tum
+        # DataFrame) burada da C tarafina GITMIYOR - sadece kucuk/sinirli
+        # onizleme meta'si donuyor, ayni data_preview blogu gibi.
+        ref = msg.get("ref")
+        row_count = msg.get("row_count", 5)
+        try:
+            data = store.get(ref)
+            meta = data_preview(data, row_count=row_count, preview_type="head")
+        except Exception as e:
+            return {"status": "error", "message": str(e)}
+        return {"status": "ok", "ref": ref, "meta": meta}
+
+    elif op == "export_csv":
+        # Kullanici GUI'de "CSV'ye Aktar" butonuna bastiginda: TUM veri
+        # (onizleme degil) dogrudan Python tarafinda diske yaziliyor - hicbir
+        # zaman JSON mesaji olarak C tarafina gonderilmiyor (CLAUDE.md'deki
+        # "buyuk veri C tarafina gitmez" prensibi burada da korunuyor).
+        ref = msg.get("ref")
+        file_path = msg.get("file_path")
+        try:
+            data = store.get(ref)
+            if not hasattr(data, "to_csv"):
+                return {"status": "error", "message": f"'{ref}' bir DataFrame degil, CSV'ye aktarilamaz"}
+            out_dir = os.path.dirname(file_path)
+            if out_dir:
+                os.makedirs(out_dir, exist_ok=True)
+            data.to_csv(file_path, index=False)
+            row_count = len(data)
+        except Exception as e:
+            return {"status": "error", "message": str(e)}
+        return {"status": "ok", "ref": ref, "file_path": file_path, "row_count": row_count}
 
     else:
         return {"status": "error", "message": f"unknown op: {op}"}

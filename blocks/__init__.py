@@ -20,7 +20,7 @@ from blocks.preprocessing import (
 )
 from blocks.encoding_scaling import EncodeCategoricalBlock, ScaleFeaturesBlock
 from blocks.data_preparation import ToTensorBlock, CreateDataLoaderBlock
-from blocks.mlp import MLPLearnerBlock
+from blocks.mlp import MLPLearnerBlock, DeepMLPLearnerBlock
 from blocks.view_blocks import (
     DataPreviewBlock,
     DatasetSummaryBlock,
@@ -39,10 +39,16 @@ from blocks.splitting import (
     TrainTestSplitBlock,
     TrainValidationTestSplitBlock,
 )
-from blocks.logistic_regression import (
-    LogisticRegressionLearnerBlock,
-    LogisticRegressionPredictorBlock,
+from blocks.metrics import (
+    ComputeClassificationMetricsBlock,
+    ComputeRegressionMetricsBlock,
 )
+# TODO: blocks/logistic_regression.py henuz repoya eklenmedi (main'de dosya eksik),
+# eklenince asagidaki iki satir tekrar acilmali
+# from blocks.logistic_regression import (
+#     LogisticRegressionLearnerBlock,
+#     LogisticRegressionPredictorBlock,
+# )
 # asagidaki satirlar, ileride eklenecek bloklar icin simdilik yorum satiri halinde birakildi
 # from blocks.splitting import TrainTestSplitBlock
 # (yeni bloklar eklendikce buraya yeni import satirlari eklenecek)
@@ -64,6 +70,7 @@ BLOCK_REGISTRY = {
     "to_tensor": ToTensorBlock,
     "create_dataloader": CreateDataLoaderBlock,
     "mlp_learner": MLPLearnerBlock,
+    "deep_mlp_learner": DeepMLPLearnerBlock,
     # "train_test_split": TrainTestSplitBlock,
 
     "data_preview": DataPreviewBlock,
@@ -82,8 +89,11 @@ BLOCK_REGISTRY = {
     "train_test_split": TrainTestSplitBlock,
     "train_validation_test_split": TrainValidationTestSplitBlock,
 
-    "logistic_regression_learner": LogisticRegressionLearnerBlock,
-    "logistic_regression_predictor": LogisticRegressionPredictorBlock,
+    "compute_classification_metrics": ComputeClassificationMetricsBlock,
+    "compute_regression_metrics": ComputeRegressionMetricsBlock,
+
+    # "logistic_regression_learner": LogisticRegressionLearnerBlock,
+    # "logistic_regression_predictor": LogisticRegressionPredictorBlock,
 }
 
 # Factory (uretici) fonksiyon: blok ismi ve parametreleri alip, hazir bir blok objesi doner

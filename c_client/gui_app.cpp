@@ -7,6 +7,7 @@
 #include "imgui.h"
 #include "imnodes.h"
 #include <cstdlib>
+#include <cstdio>
 #include <cctype>
 #include <sstream>
 
@@ -69,9 +70,58 @@ void stateColors(NodeState state, ImU32& normal, ImU32& hovered, ImU32& selected
 } // anonymous namespace
 
 GuiApp::GuiApp(PipelineEngine& engine)
-    : engine_(engine), nextId_(0), nodeNameCounter_(0), nextPosX_(40.0f), nextPosY_(40.0f) {}
+    : engine_(engine), nextId_(0), nodeNameCounter_(0), nextPosX_(40.0f), nextPosY_(40.0f),
+      isRunning_(false), previewRefreshPending_(false) {}
+
+GuiApp::~GuiApp() {
+    /* Egitim SURERKEN pencere kapatilirsa runThread_ hala calisiyor olabilir -
+     * onu yarim birakip yok edersek (std::thread'in destructor'i joinable bir
+     * thread'de cagrilirsa) program std::terminate ile coker. Burada v1'de
+     * bir "iptal" mekanizmasi YOK (bkz. gui_app.h basindaki THREAD MODELI) -
+     * sadece o an devam eden run_block cagrisi dogal olarak bitene kadar
+     * BEKLIYORUZ. Ileride gercek bir iptal istenirse, PythonProcess'e
+     * "egitimi durdur" gibi ayri bir mesaj eklenmesi gerekir. */
+    if (runThread_.joinable()) {
+        runThread_.join();
+    }
+}
+
+void GuiApp::refreshDisplayCache() {
+    for (std::map<std::string, int>::const_iterator it = nodeStrToInt_.begin(); it != nodeStrToInt_.end(); ++it) {
+        const Node* node = engine_.getNode(it->first);
+        if (!node) continue;
+        DisplayNodeInfo info;
+        info.block = node->block;
+        info.state = node->state;
+        info.lastError = node->lastError;
+        info.outputs = node->outputs;
+        displayCache_[it->first] = info;
+    }
+}
+
+void GuiApp::refreshPreviewsForUpToDateNodes() {
+    const std::map<std::string, BlockSpec>& registry = blockRegistrySpecs();
+    for (std::map<std::string, DisplayNodeInfo>::const_iterator it = displayCache_.begin(); it != displayCache_.end(); ++it) {
+        const std::string& nodeId = it->first;
+        const DisplayNodeInfo& info = it->second;
+        if (info.state != NodeState::UP_TO_DATE) continue;
+
+        std::map<std::string, BlockSpec>::const_iterator specIt = registry.find(info.block);
+        if (specIt == registry.end() || !specIt->second.producesDataFrame) continue;
+        if (info.block == "data_preview") continue;   // zaten kendisi bir onizleme, tekrar onizlemeye gerek yok
+
+        for (std::map<std::string, OutputSlot>::const_iterator slotIt = info.outputs.begin(); slotIt != info.outputs.end(); ++slotIt) {
+            JsonValue response = engine_.fetchPreview(slotIt->second.ref);
+            if (response.has("status") && response.at("status").asString() == "ok" && response.has("meta")) {
+                previewCache_[nodeId + ":" + slotIt->first] = response.at("meta");
+            }
+        }
+    }
+}
 
 void GuiApp::createNode(const std::string& blockName) {
+    if (isRunning_.load()) return;   // calisirken graf duzenlenemez (bkz. THREAD MODELI)
+
     const std::map<std::string, BlockSpec>& registry = blockRegistrySpecs();
     std::map<std::string, BlockSpec>::const_iterator specIt = registry.find(blockName);
     if (specIt == registry.end()) return;   // (olmamasi gereken durum, palet zaten registry'den doldu)
@@ -111,9 +161,12 @@ void GuiApp::createNode(const std::string& blockName) {
     if (nextPosX_ > 1400.0f) { nextPosX_ = 40.0f; nextPosY_ += 240.0f; }
 
     selectedNodeId_ = nodeId;   // yeni eklenen node otomatik secili olsun (sag panelde parametrelerini hemen doldurabilsin)
+    refreshDisplayCache();       // yeni node HEMEN bu karede de dogru cizilsin diye
 }
 
 void GuiApp::deleteNode(const std::string& nodeId) {
+    if (isRunning_.load()) return;   // calisirken graf duzenlenemez (bkz. THREAD MODELI)
+
     try {
         engine_.removeNode(nodeId);
     } catch (const std::exception& e) {
@@ -134,6 +187,16 @@ void GuiApp::deleteNode(const std::string& nodeId) {
         nodeStrToInt_.erase(intIt);
     }
     paramTextBuffers_.erase(nodeId);
+    displayCache_.erase(nodeId);
+
+    /* bu node'un onizleme cache kayitlarini da temizle ("nodeId:slot" anahtarlar) */
+    for (std::map<std::string, JsonValue>::iterator it = previewCache_.begin(); it != previewCache_.end(); ) {
+        if (it->first.compare(0, nodeId.size() + 1, nodeId + ":") == 0) {
+            previewCache_.erase(it++);
+        } else {
+            ++it;
+        }
+    }
 
     /* bu node'a giden ya da bu node'dan cikan tum gorsel link kayitlarini temizle */
     for (std::map<int, LinkInfo>::iterator it = linkInfo_.begin(); it != linkInfo_.end(); ) {
@@ -174,6 +237,7 @@ JsonValue GuiApp::buildParamsJson(const BlockSpec& spec, const std::string& node
 }
 
 void GuiApp::applyParamsForSelectedNode() {
+    if (isRunning_.load()) return;   // calisirken parametre degistirilemez (bkz. THREAD MODELI)
     if (selectedNodeId_.empty()) return;
     const Node* node = engine_.getNode(selectedNodeId_);
     if (!node) return;
@@ -185,12 +249,48 @@ void GuiApp::applyParamsForSelectedNode() {
     try {
         engine_.setParams(selectedNodeId_, params);
         lastErrorMessage_.clear();
+        refreshDisplayCache();   // DIRTY propagation'in etkisi HEMEN bu karede de gorunsun
     } catch (const std::exception& e) {
         lastErrorMessage_ = e.what();
     }
 }
 
+void GuiApp::startRun() {
+    if (isRunning_.load()) return;   // zaten calisiyorsa ikinci bir calistirma baslatma
+    if (runThread_.joinable()) runThread_.join();   // onceki thread bitmis olmali, guvenlik icin join
+
+    {
+        std::lock_guard<std::mutex> lock(progressMutex_);
+        liveProgress_.clear();
+        liveProgressLog_.clear();
+        workerErrorMessage_.clear();
+    }
+    isRunning_ = true;
+
+    /* engine_'i BURADAN itibaren SADECE bu yeni thread kullanacak - UI
+     * thread, isRunning_ tekrar false olana kadar engine_'e (ya da
+     * process_'e) dokunmuyor (bkz. gui_app.h basindaki THREAD MODELI). */
+    runThread_ = std::thread([this]() {
+        PipelineEngine::ProgressCallback onProgress =
+            [this](const std::string& nodeId, const JsonValue& progress) {
+                std::lock_guard<std::mutex> lock(progressMutex_);
+                liveProgress_[nodeId] = progress;
+                liveProgressLog_[nodeId].push_back(progress);   // adim adim biriktir - sag paneldeki canli log bunu okuyor
+            };
+        try {
+            engine_.runAll(onProgress);
+        } catch (const std::exception& e) {
+            std::lock_guard<std::mutex> lock(progressMutex_);
+            workerErrorMessage_ = e.what();
+        }
+        isRunning_ = false;             // bundan sonra UI thread engine_'e tekrar dokunabilir
+        previewRefreshPending_ = true;    // UI thread'e "onizlemeleri yenile" sinyali (bkz. gui_app.h'deki aciklama)
+    });
+}
+
 void GuiApp::handleNewLinks() {
+    if (isRunning_.load()) return;   // calisirken yeni baglanti kurulamaz (bkz. THREAD MODELI)
+
     int startPin, endPin;
     if (!ImNodes::IsLinkCreated(&startPin, &endPin)) return;
 
@@ -218,9 +318,12 @@ void GuiApp::handleNewLinks() {
     linkInfo_[linkId] = info;
     linkIdForInputSlot_[key] = linkId;   // ayni input slotunda ONCEDEN baska bir link vardiysa, artik cizilmeyecek (sadece bu yeni id gosterilir) - engine_.connect zaten eski baglantinin ustune yazdi
     lastErrorMessage_.clear();
+    refreshDisplayCache();   // DIRTY propagation'in etkisi HEMEN bu karede de gorunsun
 }
 
 void GuiApp::handleDestroyedLinks() {
+    if (isRunning_.load()) return;   // calisirken baglanti sokulemez (bkz. THREAD MODELI)
+
     int linkId;
     if (!ImNodes::IsLinkDestroyed(&linkId)) return;
 
@@ -229,6 +332,7 @@ void GuiApp::handleDestroyedLinks() {
 
     try {
         engine_.disconnect(it->second.toNode, it->second.toSlot);
+        refreshDisplayCache();
     } catch (const std::exception& e) {
         lastErrorMessage_ = e.what();
     }
@@ -237,6 +341,7 @@ void GuiApp::handleDestroyedLinks() {
 }
 
 void GuiApp::handleNodeDeletion() {
+    if (isRunning_.load()) return;   // calisirken node silinemez (bkz. THREAD MODELI)
     if (!ImGui::IsKeyPressed(ImGuiKey_Delete)) return;
     int numSelected = ImNodes::NumSelectedNodes();
     if (numSelected <= 0) return;
@@ -252,15 +357,17 @@ void GuiApp::handleNodeDeletion() {
 void GuiApp::drawPalette() {
     ImGui::TextUnformatted("Bloklar (tiklayinca eklenir)");
     ImGui::Separator();
+    if (isRunning_.load()) ImGui::BeginDisabled();
     const std::map<std::string, BlockSpec>& registry = blockRegistrySpecs();
     for (std::map<std::string, BlockSpec>::const_iterator it = registry.begin(); it != registry.end(); ++it) {
         if (ImGui::Button(it->first.c_str(), ImVec2(-1, 0))) {
             createNode(it->first);
         }
     }
+    if (isRunning_.load()) ImGui::EndDisabled();
 }
 
-void GuiApp::drawNodeContents(const std::string& nodeId, const Node& node) {
+void GuiApp::drawNodeContents(const std::string& nodeId, const DisplayNodeInfo& node) {
     NodeUiState& ui = uiState_[nodeId];
 
     ImNodes::BeginNodeTitleBar();
@@ -279,6 +386,21 @@ void GuiApp::drawNodeContents(const std::string& nodeId, const Node& node) {
         ImNodes::EndOutputAttribute();
     }
 
+    /* Ozellik B: bu node egitim gibi ilerleme bildiren bir blok calistiriyorsa
+     * (su an SADECE mlp_learner), en son epoch bilgisini node kutusunun
+     * icinde canli goster. */
+    {
+        std::lock_guard<std::mutex> lock(progressMutex_);
+        std::map<std::string, JsonValue>::const_iterator progIt = liveProgress_.find(nodeId);
+        if (progIt != liveProgress_.end()) {
+            const JsonValue& p = progIt->second;
+            ImGui::TextColored(ImVec4(0.6f, 0.85f, 1.0f, 1.0f), "epoch %d/%d - loss: %.4f",
+                                p.has("epoch") ? p.at("epoch").asInt() : 0,
+                                p.has("epochs") ? p.at("epochs").asInt() : 0,
+                                p.has("loss") ? p.at("loss").asNumber() : 0.0);
+        }
+    }
+
     if (node.state == NodeState::ERROR_STATE && !node.lastError.empty()) {
         ImGui::PushTextWrapPos(ImGui::GetCursorPos().x + 180.0f);
         ImGui::TextColored(ImVec4(1.0f, 0.6f, 0.6f, 1.0f), "%s", node.lastError.c_str());
@@ -291,17 +413,18 @@ void GuiApp::drawCanvas() {
 
     for (std::map<std::string, int>::iterator it = nodeStrToInt_.begin(); it != nodeStrToInt_.end(); ++it) {
         const std::string& nodeId = it->first;
-        const Node* node = engine_.getNode(nodeId);
-        if (!node) continue;   // silinmis olabilir (ayni karede) - guvenlik icin atla
+        std::map<std::string, DisplayNodeInfo>::const_iterator cacheIt = displayCache_.find(nodeId);
+        if (cacheIt == displayCache_.end()) continue;   // henuz cache'e girmemis (ayni karede eklenmis, bir sonraki karede gorunur)
+        const DisplayNodeInfo& node = cacheIt->second;
 
         ImU32 normal, hovered, selected;
-        stateColors(node->state, normal, hovered, selected);
+        stateColors(node.state, normal, hovered, selected);
         ImNodes::PushColorStyle(ImNodesCol_TitleBar, normal);
         ImNodes::PushColorStyle(ImNodesCol_TitleBarHovered, hovered);
         ImNodes::PushColorStyle(ImNodesCol_TitleBarSelected, selected);
 
         ImNodes::BeginNode(it->second);
-        drawNodeContents(nodeId, *node);
+        drawNodeContents(nodeId, node);
         ImNodes::EndNode();
 
         ImNodes::PopColorStyle();
@@ -343,15 +466,20 @@ void GuiApp::drawInspector() {
         ImGui::TextDisabled("Bir node secmek icin tuvaldeki kutulardan birine tikla.");
         return;
     }
-    const Node* node = engine_.getNode(selectedNodeId_);
-    if (!node) { selectedNodeId_.clear(); return; }
+    std::map<std::string, DisplayNodeInfo>::const_iterator cacheIt = displayCache_.find(selectedNodeId_);
+    if (cacheIt == displayCache_.end()) { selectedNodeId_.clear(); return; }
+    const DisplayNodeInfo& node = cacheIt->second;
 
     ImGui::TextColored(ImVec4(0.9f, 0.9f, 1.0f, 1.0f), "%s", selectedNodeId_.c_str());
-    ImGui::TextDisabled("blok: %s | durum: %s", node->block.c_str(), nodeStateToString(node->state).c_str());
+    ImGui::TextDisabled("blok: %s | durum: %s", node.block.c_str(), nodeStateToString(node.state).c_str());
     ImGui::Separator();
 
     const std::map<std::string, BlockSpec>& registry = blockRegistrySpecs();
-    std::map<std::string, BlockSpec>::const_iterator specIt = registry.find(node->block);
+    std::map<std::string, BlockSpec>::const_iterator specIt = registry.find(node.block);
+    bool producesDataFrame = specIt != registry.end() && specIt->second.producesDataFrame;
+
+    if (isRunning_.load()) ImGui::BeginDisabled();
+
     if (specIt != registry.end() && !specIt->second.params.empty()) {
         ImGui::TextUnformatted("Parametreler");
         std::map<std::string, std::string>& buf = paramTextBuffers_[selectedNodeId_];
@@ -372,24 +500,123 @@ void GuiApp::drawInspector() {
         ImGui::Separator();
     }
 
+    if (isRunning_.load()) ImGui::EndDisabled();
+
+    /* Egitim SURERKEN (mlp_learner/deep_mlp_learner gibi report_progress
+     * cagiran bloklarda), her epoch geldikce BURAYA (Cikti panelinin
+     * ustune) adim adim ekleniyor - node.outputs (nihai sonuc) sadece
+     * calisma BITTIKTEN sonra dolar, bu yuzden akan epoch'lari gormek
+     * icin ayri, canli bir log gerekiyor. */
+    if (isRunning_.load()) {
+        std::vector<JsonValue> logCopy;
+        {
+            std::lock_guard<std::mutex> lock(progressMutex_);
+            std::map<std::string, std::vector<JsonValue> >::const_iterator logIt = liveProgressLog_.find(selectedNodeId_);
+            if (logIt != liveProgressLog_.end()) logCopy = logIt->second;
+        }
+        if (!logCopy.empty()) {
+            ImGui::TextColored(ImVec4(0.6f, 0.85f, 1.0f, 1.0f), "Canli egitim logu (%d epoch):", static_cast<int>(logCopy.size()));
+            ImGui::BeginChild("live_training_log", ImVec2(0.0f, 160.0f), true, ImGuiWindowFlags_HorizontalScrollbar);
+            for (size_t i = 0; i < logCopy.size(); i++) {
+                const JsonValue& p = logCopy[i];
+                char lineBuf[128];
+                if (p.has("learning_rate")) {
+                    snprintf(lineBuf, sizeof(lineBuf), "epoch %d/%d - loss: %.4f - lr: %.6f",
+                              p.has("epoch") ? p.at("epoch").asInt() : 0,
+                              p.has("epochs") ? p.at("epochs").asInt() : 0,
+                              p.has("loss") ? p.at("loss").asNumber() : 0.0,
+                              p.at("learning_rate").asNumber());
+                } else {
+                    snprintf(lineBuf, sizeof(lineBuf), "epoch %d/%d - loss: %.4f",
+                              p.has("epoch") ? p.at("epoch").asInt() : 0,
+                              p.has("epochs") ? p.at("epochs").asInt() : 0,
+                              p.has("loss") ? p.at("loss").asNumber() : 0.0);
+                }
+                ImGui::TextUnformatted(lineBuf);
+            }
+            ImGui::SetScrollHereY(1.0f);   // yeni satir geldikce en alta kilitli kal (canli konsol gibi)
+            ImGui::EndChild();
+            ImGui::Separator();
+        }
+    }
+
     ImGui::TextUnformatted("Cikti");
-    if (node->outputs.empty()) {
+    if (node.outputs.empty()) {
         ImGui::TextDisabled("(henuz calistirilmadi)");
     } else {
-        for (std::map<std::string, OutputSlot>::const_iterator it = node->outputs.begin(); it != node->outputs.end(); ++it) {
+        for (std::map<std::string, OutputSlot>::const_iterator it = node.outputs.begin(); it != node.outputs.end(); ++it) {
             if (ImGui::CollapsingHeader(it->first.c_str(), ImGuiTreeNodeFlags_DefaultOpen)) {
                 renderNodeOutputImGui(selectedNodeId_, it->first, it->second.meta);
+
+                /* Ozellik A: bu slot bir DataFrame ise, meta'nin ustune
+                 * (varsa) otomatik onizlemeyi VE bir "CSV'ye Aktar" butonunu
+                 * ekle. */
+                if (producesDataFrame && node.block != "data_preview") {
+                    std::string cacheKey = selectedNodeId_ + ":" + it->first;
+                    std::map<std::string, JsonValue>::const_iterator prevIt = previewCache_.find(cacheKey);
+                    if (prevIt != previewCache_.end()) {
+                        ImGui::Separator();
+                        ImGui::TextDisabled("Otomatik onizleme (ilk birkac satir):");
+                        renderNodeOutputImGui(selectedNodeId_, it->first, prevIt->second);
+                    }
+
+                    if (isRunning_.load()) ImGui::BeginDisabled();
+                    std::string buttonLabel = "CSV'ye Aktar##" + cacheKey;
+                    if (ImGui::Button(buttonLabel.c_str())) {
+                        std::string exportPath = "exports/" + selectedNodeId_ + "_" + it->first + ".csv";
+                        JsonValue response = engine_.exportCsv(it->second.ref, exportPath);
+                        if (response.has("status") && response.at("status").asString() == "ok") {
+                            int rowCount = response.has("row_count") ? response.at("row_count").asInt() : 0;
+                            lastExportMessage_ = exportPath + " (" + std::to_string(rowCount) + " satir) yazildi";
+                        } else {
+                            lastErrorMessage_ = response.has("message") ? response.at("message").asString() : "export basarisiz";
+                        }
+                    }
+                    if (isRunning_.load()) ImGui::EndDisabled();
+                    if (!lastExportMessage_.empty()) {
+                        ImGui::TextDisabled("%s", lastExportMessage_.c_str());
+                    }
+                }
             }
         }
     }
 
     ImGui::Separator();
+    if (isRunning_.load()) ImGui::BeginDisabled();
     if (ImGui::Button("Bu Node'u Sil")) {
         deleteNode(selectedNodeId_);
     }
+    if (isRunning_.load()) ImGui::EndDisabled();
 }
 
 void GuiApp::render() {
+    /* engine_'in guncel durumunu SADECE calismiyorken oku (bkz. gui_app.h
+     * basindaki THREAD MODELI) - cizim kodu ("drawCanvas"/"drawInspector")
+     * bundan sonra HEP displayCache_'ten okuyacak, engine_'e dogrudan
+     * dokunmayacak. */
+    bool runningNow = isRunning_.load();
+    if (!runningNow) {
+        refreshDisplayCache();
+        /* previewRefreshPending_.exchange(false): "true ise oku VE hemen
+         * false'a cevir" - tek bir atomik islemde. Boylece worker thread
+         * TAM OLARAK ne zaman bitirdiyse bitirsin (hizli bir blok icin tek
+         * karenin icinde bile olsa), bu bayrak kaybolmadan bir sonraki
+         * !isRunning_ karesinde yakalanir - DataFrame onizlemeleri
+         * (Ozellik A) SADECE bu gecişte bir kez yenilenir, her karede degil
+         * (Python'a gereksiz istek atmamak icin). */
+        if (previewRefreshPending_.exchange(false)) {
+            refreshPreviewsForUpToDateNodes();
+        }
+    }
+
+    {
+        std::lock_guard<std::mutex> lock(progressMutex_);
+        if (!workerErrorMessage_.empty()) {
+            lastErrorMessage_ = workerErrorMessage_;
+            workerErrorMessage_.clear();
+        }
+    }
+
     ImGuiViewport* viewport = ImGui::GetMainViewport();
     ImGui::SetNextWindowPos(viewport->WorkPos);
     ImGui::SetNextWindowSize(viewport->WorkSize);
@@ -398,16 +625,13 @@ void GuiApp::render() {
                               ImGuiWindowFlags_NoBringToFrontOnFocus | ImGuiWindowFlags_NoNavFocus;
     ImGui::Begin("##main", NULL, flags);
 
-    if (ImGui::Button("Calistir (Run All)")) {
-        try {
-            engine_.runAll();
-            lastErrorMessage_.clear();
-        } catch (const std::exception& e) {
-            lastErrorMessage_ = e.what();
-        }
+    if (runningNow) ImGui::BeginDisabled();
+    if (ImGui::Button(runningNow ? "Calisiyor..." : "Calistir (Run All)")) {
+        startRun();
     }
+    if (runningNow) ImGui::EndDisabled();
     ImGui::SameLine();
-    ImGui::TextDisabled("Sadece DIRTY/NOT_RUN node'lar calisir");
+    ImGui::TextDisabled(runningNow ? "Egitim/blok calisirken grafik duzenlenemez" : "Sadece DIRTY/NOT_RUN node'lar calisir");
     if (!lastErrorMessage_.empty()) {
         ImGui::SameLine();
         ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.5f, 1.0f), "Hata: %s", lastErrorMessage_.c_str());

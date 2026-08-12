@@ -68,6 +68,13 @@ class SimpleMLP(nn.Module):
                 layers.append(nn.Dropout(p=rate))
                 # dropout, verinin boyutunu (current_size) DEGISTIRMEZ, bu yuzden current_size guncellenmiyor
 
+            elif layer_type == "batchnorm":
+                # batchnorm, bir onceki linear katmanin cikisini normalize ederek
+                # egitimi hizlandirir/stabilize eder - bu yuzden HER ZAMAN bir
+                # linear katmandan SONRA gelmeli (current_size'a gore boyutlanir)
+                layers.append(nn.BatchNorm1d(current_size))
+                # batchnorm de verinin boyutunu (current_size) DEGISTIRMEZ
+
             else:
                 # bilinmeyen bir katman tipi verilirse acik bir hata firlat
                 raise ValueError(f"Desteklenmeyen layer type: {layer_type}")
@@ -104,7 +111,7 @@ class MLPLearnerBlock(Block):
 
     VALID_TASK_TYPES = ("classification", "regression")
     VALID_OPTIMIZERS = ("adam", "sgd")
-    VALID_LAYER_TYPES = ("linear", "dropout")
+    VALID_LAYER_TYPES = ("linear", "dropout", "batchnorm")
 
     def validate(self, inputs: dict):
         # bu blok base'deki "data" kontrolunu kullanmiyor, cunku girdi
@@ -219,6 +226,16 @@ class MLPLearnerBlock(Block):
             epoch_avg_loss = sum(epoch_losses) / len(epoch_losses)
             loss_history.append(epoch_avg_loss)
 
+            # C tarafina (varsa) bu epoch'un bittigini HEMEN bildir - egitim
+            # daha SURERKEN canli ilerleme gostermek icin (bkz. blocks/base.py
+            # report_progress). progress_cb verilmediyse (orn. main.cpp/
+            # interactive_main.cpp gibi eski istemciler) bu cagri no-op'tur.
+            self.report_progress({
+                "epoch": epoch + 1,
+                "epochs": epochs,
+                "loss": epoch_avg_loss,
+            })
+
         # meta bilgisi: egitim surecinin ozeti
         meta = {
             "task_type": task_type,
@@ -228,10 +245,197 @@ class MLPLearnerBlock(Block):
             "epochs": epochs,
             "final_loss": loss_history[-1],
             "loss_history": loss_history,
+            # C tarafinda (gui_app.cpp -> result_display_imgui.cpp) bu alan
+            # sayesinde egitim ozeti + epoch-epoch log gorunumu secilir
+            "output_type": "training_log",
         }
 
         # DIKKAT: bu blogun ciktisi bir DataFrame degil, egitilmis bir PyTorch modeli (nn.Module).
         # Base class'taki finalize/validate_output metodlari hasattr kontrolu yaptigi icin
         # (reset_index, empty gibi ozellikler model objesinde olmadigindan) otomatik atlanir,
         # ekstra bir islem yapmamiza gerek yok.
+        return {"data": model, "meta": meta}
+
+
+class DeepMLPLearnerBlock(Block):
+    """
+    mlp_learner ile AYNI SimpleMLP mimarisini kullanir, ama varsayilanlari
+    ve ek parametreleri "daha sağlam" (robust) bir egitim icin ayarlanmis
+    ikinci bir learner blogu:
+
+    - varsayilan layer_config, MLPLearnerBlock'un aksine TEK degil COK katmanli
+      (linear -> batchnorm -> relu -> dropout, birkac kez tekrarlanan derin bir mimari)
+    - weight_decay (L2 regularizasyon) destegi - overfitting'i azaltmak icin
+    - opsiyonel learning rate scheduler (StepLR) - egitim ilerledikce
+      learning_rate'i kademeli dusurur
+
+    Ayri bir blok olarak tutulmasinin nedeni: mlp_learner'in varsayilan
+    davranisini (hizli, tek katmanli, test/ogrenme amacli) BOZMADAN, gercek
+    egitim senaryolarina daha yakin, daha yavas/daha agir bir model secenegi
+    sunmak (orn. canli epoch ilerlemesini gozlemlemek icin de kullanislidir,
+    cunku derin mimari MLPLearnerBlock'a gore fark edilir sekilde daha yavas calisir).
+
+    Supported params (mlp_learner'a ek olarak):
+    - weight_decay              : float, varsayilan 0.0 (Adam/SGD'nin L2 regularizasyon katsayisi)
+    - use_lr_scheduler           : bool, varsayilan False
+    - lr_scheduler_step          : int, varsayilan 10 (kac epoch'ta bir learning_rate dusurulecek)
+    - lr_scheduler_gamma         : float, varsayilan 0.5 (her adimda learning_rate'in carpilacagi katsayi)
+    - early_stopping              : bool, varsayilan False - True ise, egitim loss'u
+                                     'early_stopping_patience' epoch boyunca yeterince
+                                     iyilesmezse egitim epochs'a ulasmadan durur
+    - early_stopping_patience     : int, varsayilan 5 (iyilesme olmadan kac epoch daha beklenecek)
+    - early_stopping_min_delta    : float, varsayilan 0.0001 (bu miktardan kucuk iyilesmeler
+                                     "iyilesme" sayilmaz)
+
+    NOT: early stopping ayri bir validation seti degil, EGITIM (train) loss'unu izler -
+    bu blok tek girdili (sadece train_dataloader) kalsin diye bilincli bir tercih.
+    Gercek bir validation-loss bazli early stopping isteniyorsa, model egitildikten
+    SONRA test/validation seti uzerinde compute_*_metrics bloklariyla ayrica olculebilir.
+    """
+
+    name = "deep_mlp_learner"
+
+    VALID_TASK_TYPES = MLPLearnerBlock.VALID_TASK_TYPES
+    VALID_OPTIMIZERS = MLPLearnerBlock.VALID_OPTIMIZERS
+    VALID_LAYER_TYPES = MLPLearnerBlock.VALID_LAYER_TYPES
+
+    # varsayilan derin mimari: 3 gizli blok, her biri linear -> batchnorm -> relu -> dropout
+    DEFAULT_LAYER_CONFIG = [
+        {"type": "linear", "size": 128},
+        {"type": "batchnorm"},
+        {"type": "linear", "size": 128, "activation": "relu"},
+        {"type": "dropout", "rate": 0.3},
+        {"type": "linear", "size": 64},
+        {"type": "batchnorm"},
+        {"type": "linear", "size": 64, "activation": "relu"},
+        {"type": "dropout", "rate": 0.3},
+        {"type": "linear", "size": 32, "activation": "relu"},
+    ]
+
+    def validate(self, inputs: dict):
+        # mlp_learner ile birebir ayni girdi/param dogrulama mantigi -
+        # kod tekrarindan kacinmak icin MLPLearnerBlock.validate'i cagiriyoruz
+        # (iki sinif da ayni self.name/self.params yapisina sahip oldugu icin guvenli)
+        MLPLearnerBlock.validate(self, inputs)
+
+        weight_decay = self.params.get("weight_decay", 0.0)
+        if not isinstance(weight_decay, (int, float)) or weight_decay < 0:
+            raise ValueError(f"{self.name}: 'weight_decay' negatif olmayan bir sayi olmali")
+
+        if "early_stopping_patience" in self.params:
+            patience = self.params["early_stopping_patience"]
+            if not isinstance(patience, int) or patience < 1:
+                raise ValueError(f"{self.name}: 'early_stopping_patience' 1 veya daha buyuk bir tam sayi olmali")
+
+    def run(self, inputs: dict) -> dict:
+        train_dataloader = inputs["train_dataloader"]
+
+        task_type = self.params.get("task_type")
+        layer_config = self.params.get("layer_config", self.DEFAULT_LAYER_CONFIG)
+        learning_rate = self.params.get("learning_rate", 0.001)
+        weight_decay = self.params.get("weight_decay", 0.0)
+        epochs = self.params.get("epochs", 30)
+        optimizer_name = self.params.get("optimizer", "adam")
+        output_size = self.params.get("output_size", 1)
+
+        use_lr_scheduler = self.params.get("use_lr_scheduler", False)
+        lr_scheduler_step = self.params.get("lr_scheduler_step", 10)
+        lr_scheduler_gamma = self.params.get("lr_scheduler_gamma", 0.5)
+
+        early_stopping = self.params.get("early_stopping", False)
+        early_stopping_patience = self.params.get("early_stopping_patience", 5)
+        early_stopping_min_delta = self.params.get("early_stopping_min_delta", 0.0001)
+
+        sample_X, sample_y = next(iter(train_dataloader))
+        input_size = sample_X.shape[1]
+
+        model = SimpleMLP(
+            input_size=input_size,
+            layer_config=layer_config,
+            output_size=output_size,
+        )
+
+        if task_type == "classification":
+            loss_function = nn.CrossEntropyLoss()
+        else:
+            loss_function = nn.MSELoss()
+
+        if optimizer_name == "adam":
+            optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate, weight_decay=weight_decay)
+        else:
+            optimizer = torch.optim.SGD(model.parameters(), lr=learning_rate, weight_decay=weight_decay)
+
+        scheduler = None
+        if use_lr_scheduler:
+            scheduler = torch.optim.lr_scheduler.StepLR(
+                optimizer, step_size=lr_scheduler_step, gamma=lr_scheduler_gamma
+            )
+
+        model.train()
+
+        loss_history = []
+        lr_history = []
+
+        # early stopping durumu: en iyi (en dusuk) loss ve kac epoch'tur iyilesme olmadigi
+        best_loss = float("inf")
+        epochs_without_improvement = 0
+        stopped_early = False
+        epochs_ran = epochs
+
+        for epoch in range(epochs):
+            epoch_losses = []
+
+            for X_batch, y_batch in train_dataloader:
+                optimizer.zero_grad()
+                predictions = model(X_batch)
+                loss = loss_function(predictions, y_batch)
+                loss.backward()
+                optimizer.step()
+                epoch_losses.append(loss.item())
+
+            epoch_avg_loss = sum(epoch_losses) / len(epoch_losses)
+            loss_history.append(epoch_avg_loss)
+
+            current_lr = optimizer.param_groups[0]["lr"]
+            lr_history.append(current_lr)
+
+            if scheduler is not None:
+                # learning_rate'i, bu epoch bittikten SONRA (bir sonraki epoch icin) guncelle
+                scheduler.step()
+
+            self.report_progress({
+                "epoch": epoch + 1,
+                "epochs": epochs,
+                "loss": epoch_avg_loss,
+                "learning_rate": current_lr,
+            })
+
+            if early_stopping:
+                # loss, en iyi degerden en az min_delta kadar dustuyse "iyilesme" say
+                if epoch_avg_loss < best_loss - early_stopping_min_delta:
+                    best_loss = epoch_avg_loss
+                    epochs_without_improvement = 0
+                else:
+                    epochs_without_improvement += 1
+
+                if epochs_without_improvement >= early_stopping_patience:
+                    stopped_early = True
+                    epochs_ran = epoch + 1
+                    break
+
+        meta = {
+            "task_type": task_type,
+            "input_size": input_size,
+            "output_size": output_size,
+            "layer_config": layer_config,
+            "epochs_ran": epochs_ran,
+            "stopped_early": stopped_early,
+            "epochs": epochs,
+            "weight_decay": weight_decay,
+            "final_loss": loss_history[-1],
+            "loss_history": loss_history,
+            "lr_history": lr_history,
+            "output_type": "training_log",
+        }
+
         return {"data": model, "meta": meta}
