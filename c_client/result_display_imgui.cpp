@@ -4,6 +4,7 @@
 
 #include "result_display_imgui.h"
 #include "imgui.h"
+#include <cstdio>
 
 namespace {
 
@@ -139,6 +140,43 @@ void renderMessage(const JsonValue& meta) {
     }
 }
 
+/* mlp_learner / deep_mlp_learner ciktisi: egitim ozeti + epoch-epoch loss
+ * (varsa lr) - konsol/log gorunumu gibi, kaydirilabilir kucuk bir alanda. */
+void renderTrainingLog(const JsonValue& meta) {
+    // once loss_history/lr_history disindaki alanlari kisa bir ozet olarak yaz
+    for (std::map<std::string, JsonValue>::const_iterator it = meta.fields().begin();
+         it != meta.fields().end(); ++it) {
+        if (it->first == "loss_history" || it->first == "lr_history" || it->first == "output_type") continue;
+        std::string line = it->first + ": " + valueToCompactString(it->second);
+        ImGui::TextWrapped("%s", line.c_str());
+    }
+
+    if (!meta.has("loss_history") || !meta.at("loss_history").isArray()) {
+        return;
+    }
+
+    const JsonValue& losses = meta.at("loss_history");
+    bool hasLr = meta.has("lr_history") && meta.at("lr_history").isArray();
+    const JsonValue* lrs = hasLr ? &meta.at("lr_history") : NULL;
+
+    ImGui::Separator();
+    ImGui::TextDisabled("Egitim logu (%d epoch):", static_cast<int>(losses.size()));
+    ImGui::BeginChild("training_log_child", ImVec2(0.0f, 160.0f), true, ImGuiWindowFlags_HorizontalScrollbar);
+    for (size_t i = 0; i < losses.size(); i++) {
+        char lineBuf[128];
+        double lossVal = losses[i].asNumber();
+        if (lrs != NULL && i < lrs->size()) {
+            double lrVal = (*lrs)[i].asNumber();
+            snprintf(lineBuf, sizeof(lineBuf), "epoch %4d - loss: %.4f - lr: %.6f",
+                      static_cast<int>(i + 1), lossVal, lrVal);
+        } else {
+            snprintf(lineBuf, sizeof(lineBuf), "epoch %4d - loss: %.4f", static_cast<int>(i + 1), lossVal);
+        }
+        ImGui::TextUnformatted(lineBuf);
+    }
+    ImGui::EndChild();
+}
+
 /* v1 kapsam karari (bkz. plan): gercek Plotly figure_json render'i yok,
  * sadece grafik turu + kucuk bir bilgi notu gosteriliyor. */
 void renderChartPlaceholder(const JsonValue& meta) {
@@ -165,6 +203,8 @@ void renderNodeOutputImGui(const std::string& nodeId, const std::string& slot, c
         renderMessage(meta);
     } else if (outputType == "chart") {
         renderChartPlaceholder(meta);
+    } else if (outputType == "training_log") {
+        renderTrainingLog(meta);
     } else {
         renderGenericFallback(meta);
     }

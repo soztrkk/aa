@@ -149,6 +149,21 @@ JsonValue PythonProcess::request(const JsonValue& requestValue) {
     return recvJson();          // hemen ardindan cevabi oku ve doner
 }
 
+JsonValue PythonProcess::requestWithProgress(const JsonValue& requestValue,
+                                              const std::function<void(const JsonValue&)>& onProgress) {
+    sendJson(requestValue);   // istegi gonder
+
+    while (true) {
+        JsonValue response = recvJson();   // bir satir oku (ya ara ilerleme ya da nihai cevap)
+        std::string status = response.has("status") ? response.at("status").asString() : "";
+        if (status == "progress") {          // ara bildirim: cagirana ilet, okumaya DEVAM et
+            if (onProgress) onProgress(response);
+            continue;
+        }
+        return response;   // "progress" degilse (ok/error) bu NIHAI cevaptir
+    }
+}
+
 void PythonProcess::stop() {
     if (!running_) return;   // zaten durmussa yapilacak bir sey yok
 

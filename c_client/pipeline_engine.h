@@ -31,6 +31,7 @@
 #include <map>       // node_id -> Node haritasi ve slot haritalari icin std::map
 #include <vector>    // calistirma sirasi listesi icin std::vector
 #include <set>       // dirty propagation sirasinda "zaten ziyaret edildi" takibi icin std::set
+#include <functional>   // runAll'a verilebilen opsiyonel ProgressCallback icin
 #include "json_value.h"      // params/meta alanlari icin JsonValue
 #include "python_process.h"  // Python'a mesaj gondermek icin PythonProcess
 
@@ -98,16 +99,39 @@ public:
 
     /* --- calistirma --- */
 
+    /* runAll()'a opsiyonel olarak verilebilir: bir node calisirken (orn.
+     * mlp_learner'in her epoch sonunda) Python'dan ara "progress" satiri
+     * gelirse, bu callback (nodeId, o satirin tum JSON'u) ile cagirilir -
+     * nihai sonuc gelmeden ONCE, node hala calisiyorken. Callback
+     * verilmezse (varsayilan, main.cpp/interactive_main.cpp'nin kullandigi
+     * hal) davranis eskisiyle birebir aynidir. */
+    using ProgressCallback = std::function<void(const std::string& nodeId, const JsonValue& progress)>;
+
     /* Sadece NOT_RUN/DIRTY durumundaki node'lari, bagimlilik sirasina gore
      * (once upstream, sonra downstream) Python'a gonderir. UP_TO_DATE
      * node'lar ATLANIR - hic mesaj gonderilmez (CLAUDE.md: "Secici calistirma").
      * Bir node hata verirse, ona bagli asagi akis node'lari o turda
      * calistirilmaz (onlarin girdisi guvenilir degil demektir). */
-    void runAll();   // NOT_RUN/DIRTY node'lari dogru sirayla calistirir, UP_TO_DATE olanlari atlar
+    void runAll(const ProgressCallback& onProgress = ProgressCallback());   // NOT_RUN/DIRTY node'lari dogru sirayla calistirir, UP_TO_DATE olanlari atlar
 
     /* --- durum sorgulama --- */
     const Node* getNode(const std::string& id) const;   // id'ye ait node'un salt-okunur pointer'ini doner, yoksa nullptr
     void printStatus() const;                              // tum node'larin durumunu ekrana basar
+
+    /* --- node graph'ina DOKUNMAYAN, dogrudan SessionStore sorgulari ---
+     * (removeNode'un delete_node icin yaptigi gibi process_.request'i
+     * doguden sarmalar; run_block/dirty-propagation mantigina hic girmez) */
+
+    /* Var olan bir ref'in (node->outputs[slot].ref) "ilk N satir"
+     * onizlemesini Python'dan ister (get_preview op'u, bkz. dispatcher.py).
+     * Donen JsonValue ham cevaptir - cagiran taraf "status"e bakmali. */
+    JsonValue fetchPreview(const std::string& ref, int rowCount = 5);
+
+    /* Var olan bir ref'teki TAM veriyi (onizleme degil) Python'a dogrudan
+     * diske (filePath) CSV olarak yazdirir - veri hicbir zaman bu JSON
+     * cevabinin icinde C tarafina gelmez, sadece basari/hata + satir sayisi
+     * doner (export_csv op'u, bkz. dispatcher.py). */
+    JsonValue exportCsv(const std::string& ref, const std::string& filePath);
 
 private:
     PythonProcess& process_;              // Python'a mesaj gondermek icin kullanilan referans
@@ -117,7 +141,7 @@ private:
     std::vector<std::string> topologicalRunOrder() const;   // node'lari bagimlilik sirasina gore (once upstream) diziye koyar
     void visitForOrder(const std::string& id, std::set<std::string>& visited,          // topolojik siralama icin derinlik-oncelikli gezinme
                         std::vector<std::string>& order) const;
-    bool runSingleNode(Node& node);   // Python'a run_block gonderir, sonucu isler
+    bool runSingleNode(Node& node, const ProgressCallback& onProgress);   // Python'a run_block gonderir, sonucu isler
 };
 
 #endif // PIPELINE_ENGINE_H  -- basligin sonu

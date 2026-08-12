@@ -63,7 +63,21 @@ class Block(ABC):
     def get_data_copy(self, inputs: dict):
         return inputs["data"].copy()
 
-    def execute(self, inputs: dict) -> dict:
+    def report_progress(self, payload: dict) -> None:
+        """
+        run() icinden (orn. her epoch sonunda) cagirilir. dispatcher.py,
+        execute()'a bir progress_cb verdiyse bu cagri Python'dan HEMEN bir
+        "status": "progress" satiri olarak C tarafina gonderilir - nihai
+        sonuc donmeden ONCE, egitim SURERKEN. progress_cb verilmediyse
+        (coğu blok/coğu cagiran icin varsayilan) hicbir sey yapmaz - bu
+        yuzden report_progress kullanmayan bloklarda davranis degismez.
+        """
+        progress_cb = getattr(self, "_progress_cb", None)
+        if progress_cb is not None:
+            progress_cb(payload)
+
+    def execute(self, inputs: dict, progress_cb=None) -> dict:
+        self._progress_cb = progress_cb
         self.validate(inputs)
         result = self.run(inputs)
         result = self._normalize_result(result)   # <-- yeni eklenen adim

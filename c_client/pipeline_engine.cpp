@@ -151,7 +151,7 @@ std::vector<std::string> PipelineEngine::topologicalRunOrder() const {
     return order;   // upstream'lerin her zaman downstream'lerden once geldigi bir sira doner
 }
 
-bool PipelineEngine::runSingleNode(Node& node) {
+bool PipelineEngine::runSingleNode(Node& node, const ProgressCallback& onProgress) {
     JsonValue req = JsonValue::makeObject();                                    // Python'a gonderilecek istegi olustur
     req["op"] = JsonValue("run_block");                                          // protokoldeki operasyon adi
     req["node_id"] = JsonValue(node.id);                                          // hangi node calisiyor
@@ -165,7 +165,11 @@ bool PipelineEngine::runSingleNode(Node& node) {
     }
     req["inputs"] = inputsJson;                                                  // istege ekle
 
-    JsonValue response = process_.request(req);                                 // istegi gonder, Python cevabini bekle
+    const std::string nodeId = node.id;   // lambda icinde kullanmak icin kopya (node& capture etmeye gerek yok)
+    JsonValue response = process_.requestWithProgress(req,                       // istegi gonder, ara ilerleme + nihai cevabi bekle
+        [&onProgress, &nodeId](const JsonValue& progress) {
+            if (onProgress) onProgress(nodeId, progress);   // her epoch/ilerleme satirinda cagirana ilet
+        });
 
     std::string status = response.has("status") ? response.at("status").asString() : "error";   // "status" alani yoksa guvenli varsayilan: error
     if (status == "ok") {                                                        // basarili calisma
@@ -191,7 +195,7 @@ bool PipelineEngine::runSingleNode(Node& node) {
     }
 }
 
-void PipelineEngine::runAll() {
+void PipelineEngine::runAll(const ProgressCallback& onProgress) {
     std::vector<std::string> order = topologicalRunOrder();   // upstream'lerin once geldigi calistirma sirasi
     std::set<std::string> failedOrSkipped;                       // bu turda hata veren/atlanan node id'leri
 
@@ -223,7 +227,7 @@ void PipelineEngine::runAll() {
         }
 
         std::cout << "  [" << node.id << "] calistiriliyor (" << node.block << ")...\n";
-        bool ok = runSingleNode(node);   // Python'a run_block gonder, sonuca gore node.state guncellenir
+        bool ok = runSingleNode(node, onProgress);   // Python'a run_block gonder, sonuca gore node.state guncellenir
         if (ok) {
             std::cout << "      -> basarili, state = UP_TO_DATE\n";
         } else {
@@ -236,6 +240,22 @@ void PipelineEngine::runAll() {
 const Node* PipelineEngine::getNode(const std::string& id) const {
     std::map<std::string, Node>::const_iterator it = nodes_.find(id);   // id'yi haritada ara
     return it == nodes_.end() ? NULL : &it->second;                        // bulunamadiysa NULL, bulunduysa pointer doner
+}
+
+JsonValue PipelineEngine::fetchPreview(const std::string& ref, int rowCount) {
+    JsonValue req = JsonValue::makeObject();
+    req["op"] = JsonValue("get_preview");
+    req["ref"] = JsonValue(ref);
+    req["row_count"] = JsonValue(rowCount);
+    return process_.request(req);   // node graph'ina hic dokunmuyor, dogrudan Python'a sorup cevabi aynen doner
+}
+
+JsonValue PipelineEngine::exportCsv(const std::string& ref, const std::string& filePath) {
+    JsonValue req = JsonValue::makeObject();
+    req["op"] = JsonValue("export_csv");
+    req["ref"] = JsonValue(ref);
+    req["file_path"] = JsonValue(filePath);
+    return process_.request(req);   // TAM veri Python'da diske yazilir, buraya sadece basari/hata + satir sayisi doner
 }
 
 void PipelineEngine::printStatus() const {

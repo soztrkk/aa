@@ -240,6 +240,27 @@ const std::map<std::string, BlockSpec>& blockRegistrySpecs() {
         // Python tarafi varsayilan tek-katmanli (64 noron, relu) mimariyi kullanir.
         registry["mlp_learner"] = spec;
     }
+    {   // Deep MLP: daha derin/sağlam varsayilan mimari + weight_decay + lr scheduler + early stopping
+        BlockSpec spec;
+        spec.inputSlots = slots1("train_dataloader");   // mlp_learner ile ayni: tek girdi, egitim DataLoader'i
+        spec.producesDataFrame = false;   // cikti egitilmis model, DataFrame degil
+        spec.params.push_back(P("task_type", "task_type (classification/regression, ZORUNLU): ", ParamType::String, true));
+        spec.params.push_back(P("output_size", "output_size (classification icin sinif sayisi ZORUNLU, regression icin bos=1): ", ParamType::Number, false));
+        spec.params.push_back(P("learning_rate", "learning_rate [bos = 0.001]: ", ParamType::Number, false));
+        spec.params.push_back(P("epochs", "epochs [bos = 30]: ", ParamType::Number, false));
+        spec.params.push_back(P("optimizer", "optimizer (adam/sgd) [bos = adam]: ", ParamType::String, false));
+        spec.params.push_back(P("weight_decay", "weight_decay (L2 regularizasyon) [bos = 0.0]: ", ParamType::Number, false));
+        spec.params.push_back(P("use_lr_scheduler", "use_lr_scheduler (true/false) [bos = false]: ", ParamType::Bool, false));
+        spec.params.push_back(P("lr_scheduler_step", "lr_scheduler_step (sadece use_lr_scheduler=true) [bos = 10]: ", ParamType::Number, false));
+        spec.params.push_back(P("lr_scheduler_gamma", "lr_scheduler_gamma (sadece use_lr_scheduler=true) [bos = 0.5]: ", ParamType::Number, false));
+        spec.params.push_back(P("early_stopping", "early_stopping (true/false) [bos = false]: ", ParamType::Bool, false));
+        spec.params.push_back(P("early_stopping_patience", "early_stopping_patience (sadece early_stopping=true) [bos = 5]: ", ParamType::Number, false));
+        spec.params.push_back(P("early_stopping_min_delta", "early_stopping_min_delta (sadece early_stopping=true) [bos = 0.0001]: ", ParamType::Number, false));
+        // NOT: layer_config burada da sorulmuyor (bkz. mlp_learner notu) - bos
+        // birakilirsa Python tarafi varsayilan DERIN mimariyi (3 katmanli,
+        // batchnorm+dropout'lu) kullanir.
+        registry["deep_mlp_learner"] = spec;
+    }
 
     // ============================= metrikler (skor) =============================
 

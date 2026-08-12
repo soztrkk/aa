@@ -1,6 +1,6 @@
 # C++ Pipeline Client - Adim Adim
 
-Bu klasordeki kod, CLAUDE.md'de tanimlanan "C tarafi" (pipeline engine + UI
+Bu klasordeki kod, "C tarafi" (pipeline engine + UI
 sorumlulugu) icin ATILAN ILK GERCEK ADIM. `block_pipeline_demo.c` (eski dosya,
 dokunulmadi) sadece pipe iletisiminin nasil kuruldugunu gosteren tek seferlik
 bir demoydu; bu klasordeki yeni dosyalar onun uzerine, GERCEKTEN kullanilabilir
@@ -38,8 +38,7 @@ main.cpp
 `runAll()` her calisan node icin sirasiyla:
 1. JSON istek olusturur: `{"op":"run_block","node_id":...,"block":...,"params":...,"inputs":{...}}`
 2. `PythonProcess::request()` ile gonderir, cevabi bekler (dispatcher.py tek
-   process olarak surekli acik kalir, CLAUDE.md'deki "neden bu yontem
-   secildi" bolumundeki gerekce burada).
+   process olarak surekli acik kalir)
 3. `status: "ok"` ise node'un `outputs` haritasini (ref + meta) gunceller,
    state = UP_TO_DATE yapar.
 4. `status: "error"` ise state = ERROR yapar, hata mesajini saklar, o node'a
@@ -270,16 +269,61 @@ UP_TO_DATE, sari = DIRTY, kirmizi = ERROR, gri = NOT_RUN - KNIME'daki
 "traffic light" fikri). Node secip Delete tusuna basarak ya da sag panelden
 "Bu Node'u Sil" ile silebilirsin.
 
+### Otomatik onizleme + CSV export
+
+Bir node'un ciktisi DataFrame ise (`BlockSpec::producesDataFrame`), node
+basariyla calistiktan sonra sag panelde meta bilginin ALTINA otomatik olarak
+kucuk bir onizleme (ilk birkac satir) eklenir - `data_preview` blogunu ELLE
+eklemene gerek yok. Bunun icin protokole iki yeni op eklendi
+(`dispatcher.py`): `get_preview` (sadece SessionStore'daki veriye bakip
+`blocks/graphs_and_views.py::data_preview`'i dogrudan cagirir, hicbir
+node/blok calistirmaz) ve `export_csv` (TAM veriyi - onizleme degil -
+dogrudan Python'da diske yazar; veri HICBIR ZAMAN JSON mesaji olarak C
+tarafina gelmez). Ayni panelde her DataFrame slotu icin bir **"CSV'ye
+Aktar"** butonu var, tiklaninca proje kok dizininde `exports/<node>_<slot>.csv`
+dosyasi olusturur.
+
+`PipelineEngine`'e bu ikisi icin node-graph'a hic dokunmayan iki kucuk
+yardimci eklendi: `fetchPreview(ref, rowCount)` ve `exportCsv(ref, filePath)`
+(`removeNode`'un `delete_node` icin yaptigi gibi dogrudan `process_.request(...)`
+sarmalar).
+
+### Canli epoch akisi (mlp_learner)
+
+`mlp_learner` calisirken, artik SADECE en sonda degil, HER EPOCH bittikce
+node kutusunun icinde "epoch 12/30 - loss: 0.2451" seklinde canli bir
+satir goruyorsun. Bunun icin protokol genisletildi: Python tarafi (bkz.
+`blocks/base.py::report_progress`, `blocks/mlp.py` epoch dongusu,
+`dispatcher.py::emit_progress`) nihai `{"status":"ok",...}` cevabindan ONCE
+istedigi kadar `{"status":"progress",...}` satiri gonderebilir.
+`PythonProcess::requestWithProgress()` bu satirlari okuyup callback'e iletir,
+`"progress"` OLMAYAN ilk satiri nihai cevap olarak doner. Bu mekanizmayi
+KULLANMAYAN diger 26 blok icin davranis birebir eskisiyle aynidir (hicbir
+progress satiri hic gonderilmez).
+
+**Onemli - thread modeli**: `engine_.runAll()` artik GUI'de AYRI bir
+thread'de (`std::thread`) calisiyor, boylece egitim SURERKEN pencere
+KILITLENMIYOR (canvas'ta gezinebilir, baska bir node'u secip onceki
+ciktilarina bakabilirsin). Bunun GUVENLI olmasi TEK BIR KURALA dayanir:
+calisma SURERKEN (`isRunning_` true) UI thread `engine_`'e ASLA dogrudan
+dokunmaz - node ekleme/silme/baglama/parametre degistirme/onizleme/export
+butonlari o sure boyunca DEVRE DISI birakilir, cizim kodu ise `engine_`'in
+kendisi yerine GuiApp'in kendi "dondurulmus" `displayCache_`'inden okur.
+Detayli aciklama icin `gui_app.h` basindaki "THREAD MODELI" yorumuna bak -
+bu, mutex'e gerek birakmayan basit bir "sahiplik devri" (ownership
+hand-off) deseni.
+
 ### v1 kapsam disi (bilerek, ileride genisletilebilir)
 
 - Grafik ureten bloklarin (plot_histogram vb.) ciktisi GERCEK bir grafik
   olarak cizilmiyor - sadece `chart_type` + bir placeholder notu gosteriliyor
   (bkz. `result_display_imgui.cpp` `renderChartPlaceholder`). Gercek Plotly
   `figure_json` render'i icin ayri bir cizim katmani gerekir.
-- `engine.runAll()` GUI'de de senkron (bloklu) cagriliyor - uzun suren bir
-  blok (orn. `mlp_learner`) calisirken pencere kisa sureligine "yanit
-  vermiyor" gorunebilir. Asenkron calistirma CLAUDE.md'de zaten ayri,
-  ileriye donuk bir madde olarak isaretli.
+- Egitimi ILERI DUZEY iptal etme (cancel) mekanizmasi yok - pencere egitim
+  SURERKEN kapatilirsa, o an devam eden `run_block` cagrisi dogal olarak
+  bitene kadar kapanma BEKLER (bkz. `GuiApp::~GuiApp()`).
+- Export hedef klasoru/dosya adi icin gercek bir "Farkli Kaydet" dialog'u
+  yok - sabit `exports/<node>_<slot>.csv` yoluna yazilir.
 - Node pozisyonlarinin/pipeline'in diske kaydedilip tekrar yuklenmesi yok -
   her acilista bos bir tuvalle baslarsin.
 
