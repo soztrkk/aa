@@ -14,7 +14,13 @@ from blocks.preprocessing import (
     HandleMissingValuesBlock,
     RemoveDuplicatesBlock,
     HandleOutliersBlock,
+    DropColumnsBlock,
+    RenameColumnsBlock,
+    ConvertDtypeBlock
 )
+from blocks.encoding_scaling import EncodeCategoricalBlock, ScaleFeaturesBlock
+from blocks.data_preparation import ToTensorBlock, CreateDataLoaderBlock
+from blocks.mlp import MLPLearnerBlock, DeepMLPLearnerBlock
 from blocks.view_blocks import (
     DataPreviewBlock,
     DatasetSummaryBlock,
@@ -33,12 +39,17 @@ from blocks.splitting import (
     TrainTestSplitBlock,
     TrainValidationTestSplitBlock,
 )
-from blocks.logistic_regression import (
-    LogisticRegressionLearnerBlock,
-    LogisticRegressionPredictorBlock,
+from blocks.metrics import (
+    ComputeClassificationMetricsBlock,
+    ComputeRegressionMetricsBlock,
 )
+# TODO: blocks/logistic_regression.py henuz repoya eklenmedi (main'de dosya eksik),
+# eklenince asagidaki iki satir tekrar acilmali
+# from blocks.logistic_regression import (
+#     LogisticRegressionLearnerBlock,
+#     LogisticRegressionPredictorBlock,
+# )
 # asagidaki satirlar, ileride eklenecek bloklar icin simdilik yorum satiri halinde birakildi
-# from blocks.encoding_scaling import NormalizeBlock, EncodeCategoricalBlock
 # from blocks.splitting import TrainTestSplitBlock
 # (yeni bloklar eklendikce buraya yeni import satirlari eklenecek)
 
@@ -51,6 +62,16 @@ BLOCK_REGISTRY = {
     "handle_missing_values": HandleMissingValuesBlock,
     "remove_duplicates": RemoveDuplicatesBlock,
     "handle_outliers": HandleOutliersBlock,
+    "drop_columns": DropColumnsBlock,
+    "rename_columns":RenameColumnsBlock,
+    "convert_dtype": ConvertDtypeBlock,
+    "encode_categorical": EncodeCategoricalBlock,
+    "scale_features": ScaleFeaturesBlock,
+    "to_tensor": ToTensorBlock,
+    "create_dataloader": CreateDataLoaderBlock,
+    "mlp_learner": MLPLearnerBlock,
+    "deep_mlp_learner": DeepMLPLearnerBlock,
+    # "train_test_split": TrainTestSplitBlock,
 
     "data_preview": DataPreviewBlock,
     "dataset_summary": DatasetSummaryBlock,
@@ -68,8 +89,11 @@ BLOCK_REGISTRY = {
     "train_test_split": TrainTestSplitBlock,
     "train_validation_test_split": TrainValidationTestSplitBlock,
 
-    "logistic_regression_learner": LogisticRegressionLearnerBlock,
-    "logistic_regression_predictor": LogisticRegressionPredictorBlock,
+    "compute_classification_metrics": ComputeClassificationMetricsBlock,
+    "compute_regression_metrics": ComputeRegressionMetricsBlock,
+
+    # "logistic_regression_learner": LogisticRegressionLearnerBlock,
+    # "logistic_regression_predictor": LogisticRegressionPredictorBlock,
 }
 
 # Factory (uretici) fonksiyon: blok ismi ve parametreleri alip, hazir bir blok objesi doner

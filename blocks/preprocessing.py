@@ -1,7 +1,7 @@
 from blocks.base import Block
 import pandas as pd
 
-# HandleMissingValuesBlock, eksik (NaN) verileri isleyen blok
+# eksik (NaN) verileri isleyen blok
 class HandleMissingValuesBlock(Block):
     """
     Handles missing (NaN) values in the dataset using different strategies.
@@ -111,8 +111,7 @@ class HandleMissingValuesBlock(Block):
         # isli DataFrame ve meta bilgisini geri dondur
         return {"data": df, "meta": meta}
 
-
-# Yardimci fonksiyon, bir pandas Series'in sayisal (numeric) tipte olup olmadigini kontrol eder
+# yardimci fonksiyon, bir pandas series'in numeric tipte olup olmadigini kontrol eder
 def pd_is_numeric(series) -> bool:
     """
     Small helper to check if a pandas Series has a numeric dtype.
@@ -311,3 +310,123 @@ class HandleOutliersBlock(Block):
             lower, upper = bounds[col]
             mask = mask | (df[col] < lower) | (df[col] > upper)
         return mask
+
+class DropColumnsBlock(Block):
+    """
+    Supported params:
+    - columns : silinecek kolon isimlerinin listesi (zorunlu)
+    """
+
+    name = "drop_columns"
+
+    def validate(self, inputs: dict):
+        super().validate(inputs)
+
+        df = inputs["data"]
+        columns = self.params.get("columns")
+        if not columns:
+            raise ValueError(f"{self.name}: 'columns' parametresi eksik")
+
+        missing_cols = [c for c in columns if c not in df.columns]
+        if missing_cols:
+            raise ValueError(f"{self.name}: columns not found in data -> {missing_cols}")
+
+    def run(self, inputs: dict) -> dict:
+        df = self.get_data_copy(inputs)
+
+        columns = self.params.get("columns")
+        df = df.drop(columns=columns)
+
+        meta = {
+            "shape": list(df.shape),
+            "columns": df.columns.tolist(),
+        }
+
+        return {"data": df, "meta": meta}
+
+class RenameColumnsBlock(Block):
+    """
+    tek bir columnun ismini degistirir. birden fazla kolon yeniden adlandirilacaksa
+    bu blok her kolon icin ayri ayri (ayri node olarak) cagrilmalidir.
+
+    Supported params:
+    - column   : yeniden adlandirilacak mevcut kolon ismi (zorunlu)
+    - new_name : kolonun yeni ismi (zorunlu)
+    """
+    name = "rename_columns"
+
+    def validate(self, inputs: dict):
+        super().validate(inputs)
+
+        df = inputs["data"]
+
+        column = self.params.get("column")
+        if not column:
+            raise ValueError(f"{self.name}: 'column' parametresi eksik")
+
+        if column not in df.columns:
+            raise ValueError(f"{self.name}: columns not found in data -> ['{column}']")
+
+        new_name = self.params.get("new_name")
+        if not new_name:
+            raise ValueError(f"{self.name}: 'new_name' parametresi eksik")
+
+        if new_name != column and new_name in df.columns:
+            raise ValueError(f"{self.name}: '{new_name}' isimli bir kolon zaten mevcut")
+
+    def run(self, inputs: dict) -> dict:
+        df = self.get_data_copy(inputs)
+        column = self.params.get("column")
+        new_name = self.params.get("new_name")
+
+        df = df.rename(columns={column: new_name})
+
+        meta = {
+            "shape": list(df.shape),
+            "columns": df.columns.tolist(),
+        }
+
+        return {"data": df, "meta": meta}
+
+class ConvertDtypeBlock(Block):
+    """"
+    tek column icin data type donusumu yapar
+    supported parameters:
+        -column: dtype degistirilecek column
+        -dtype: cevrilmek istenen dtype
+    """
+    name= "convert_dtype"
+
+    def validate(self,inputs:dict):
+        super().validate(inputs)
+
+        df = inputs["data"]
+
+        column = self.params.get("column")
+        if not column:
+            raise ValueError(f"{self.name}: 'column' parametresi eksik")
+
+        if column not in df.columns:
+            raise ValueError(f"{self.name}: column not found in data -> ['{column}']")
+
+        dtype = self.params.get("dtype")
+        if not dtype:
+            raise ValueError(f"{self.name}: 'dtype' parametresi eksik")
+
+        if dtype == df[column].dtype:
+            raise ValueError(f"{self.name}: '{column}' isimli kolonun dtype'ı zaten istenen şekilde.")
+
+
+    def run(self, inputs:dict) -> dict:
+        df= self.get_data_copy(inputs)
+        column = self.params.get("column")
+        dtype = self.params.get("dtype")
+
+        df[column] = df[column].astype(dtype)
+
+        meta = {
+            "shape": list(df.shape),
+            "dtypes": {col: str(dt) for col, dt in df.dtypes.items()},
+        }
+
+        return {"data": df, "meta": meta}
