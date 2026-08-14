@@ -39,7 +39,21 @@ def handle_message(msg: dict) -> dict:
 
         try:
             block = create_block(block_name, params)
-            result = block.execute(inputs)
+
+            def progress_cb(payload):
+                progress_message = {
+                    "type": "progress",
+                    "node_id": node_id,
+                    **payload,
+                }
+
+                print(
+                    json.dumps(progress_message),
+                    flush=True
+                )
+
+            result = block.execute(inputs, progress_cb=progress_cb)
+
         except Exception as e:
             return {"status": "error", "node_id": node_id, "message": str(e)}
 
@@ -78,6 +92,69 @@ def handle_message(msg: dict) -> dict:
             "columns": data.columns.tolist() if hasattr(data, "columns") else None,
         }
         return {"status": "ok", "ref": ref, "meta": meta}
+
+    elif op == "get_preview":
+        ref = msg.get("ref")
+        row_count = msg.get("row_count", 5)
+
+        try:
+            data = store.get(ref)
+        except ValueError as e:
+            return {"status": "error", "message": str(e)}
+
+        if not hasattr(data, "head") or not hasattr(data, "columns"):
+            return {
+                "status": "error",
+                "message": "get_preview: veri DataFrame degil"
+            }
+
+        preview = data.head(row_count).copy()
+        preview = preview.astype(object).where(preview.notna(), None)
+
+        meta = {
+            "output_type": "table",
+            "title": "Data Preview",
+            "columns": preview.columns.tolist(),
+            "records": preview.to_dict(orient="records"),
+            "row_count": len(preview),
+        }
+
+        return {
+            "status": "ok",
+            "ref": ref,
+            "meta": meta,
+        }
+
+
+    elif op == "export_csv":
+        ref = msg.get("ref")
+        file_path = msg.get("file_path")
+
+        try:
+            data = store.get(ref)
+        except ValueError as e:
+            return {"status": "error", "message": str(e)}
+
+        if not hasattr(data, "to_csv"):
+            return {
+                "status": "error",
+                "message": "export_csv: veri DataFrame degil"
+            }
+
+        import os
+
+        directory = os.path.dirname(file_path)
+        if directory:
+            os.makedirs(directory, exist_ok=True)
+
+        data.to_csv(file_path, index=False)
+
+        return {
+            "status": "ok",
+            "ref": ref,
+            "file_path": file_path,
+            "row_count": len(data),
+        }
 
     else:
         return {"status": "error", "message": f"unknown op: {op}"}
