@@ -56,14 +56,14 @@ REM %PATH% degeri genelde "C:\Program Files (x86)\..." gibi parantez icerir,
 REM bu da "if (...) ( ... )" tarzi COK SATIRLI bir blok icinde expand edilirse
 REM cmd'nin parantez sayacini bozup "unexpected at this time" hatasi verir.
 set GUI_GXX=g++
-if exist "C:\msys64\mingw64\bin\g++.exe" set GUI_GXX=C:\msys64\mingw64\bin\g++.exe
+if exist "C:\msys64\ucrt64\bin\g++.exe" set GUI_GXX=C:\msys64\ucrt64\bin\g++.exe
 REM g++.exe'nin kendisi calisir ama beraberindeki cc1plus.exe/collect2.exe
 REM derleme SIRASINDA ihtiyac duydugu DLL'leri (libstdc++-6.dll vb.) SADECE
 REM bu klasor PATH'te ise bulabiliyor - yoksa hicbir hata mesaji BASMADAN
 REM sessizce basarisiz oluyor (pencere/masaustu olmadigi icin normalde cikacak
 REM "DLL bulunamadi" penceresi de gorunmuyor). Bu yuzden PATH'e eklemek
 REM ZORUNLU, sadece g++'i tam yoldan cagirmak yetmiyor.
-if exist "C:\msys64\mingw64\bin\g++.exe" set PATH=C:\msys64\mingw64\bin;%PATH%
+if exist "C:\msys64\ucrt64\bin\g++.exe" set PATH=C:\msys64\ucrt64\bin;%PATH%
 
 REM -DIMGUI_DEFINE_MATH_OPERATORS: imnodes.h "imgui.h"i BU MAKRO TANIMLANMADAN
 REM once include ediyor (kendi .cpp'sinde makroyu daha sonra tanimlasa bile,
