@@ -132,6 +132,76 @@ std::string PythonProcess::readLine() {
     return result;   // okunan satiri (satir sonu olmadan) doner
 }
 
+std::string PythonProcess::readLineWithTimeout(DWORD timeoutMs) {
+    if (!running_) {
+        return "";
+    }
+
+    std::string result;
+    DWORD startTime = GetTickCount();
+
+    while (true) {
+        DWORD availableBytes = 0;
+
+        BOOL peekOk = PeekNamedPipe(
+            childStdoutRead_,
+            NULL,
+            0,
+            NULL,
+            &availableBytes,
+            NULL
+        );
+
+        if (!peekOk) {
+            throw std::runtime_error(
+                "PythonProcess::readLineWithTimeout: pipe kontrolu basarisiz"
+            );
+        }
+
+        if (availableBytes > 0) {
+            char ch;
+            DWORD bytesRead = 0;
+
+            BOOL readOk = ReadFile(
+                childStdoutRead_,
+                &ch,
+                1,
+                &bytesRead,
+                NULL
+            );
+
+            if (!readOk || bytesRead == 0) {
+                throw std::runtime_error(
+                    "PythonProcess::readLineWithTimeout: Python process kapanmis olabilir"
+                );
+            }
+
+            if (ch == '\n') {
+                break;
+            }
+
+            if (ch == '\r') {
+                continue;
+            }
+
+            result += ch;
+        }
+        else {
+            DWORD elapsed = GetTickCount() - startTime;
+
+            if (elapsed >= timeoutMs) {
+                throw std::runtime_error(
+                    "PythonProcess::readLineWithTimeout: timeout"
+                );
+            }
+
+            Sleep(10);
+        }
+    }
+
+    return result;
+}
+
 void PythonProcess::sendJson(const JsonValue& value) {
     sendLine(value.dump());   // once JSON metnine cevir, sonra tek satir olarak gonder
 }
@@ -144,24 +214,112 @@ JsonValue PythonProcess::recvJson() {
     return JsonValue::parse(line);   // satiri JSON olarak ayristirip doner
 }
 
-JsonValue PythonProcess::request(const JsonValue& requestValue) {
-    sendJson(requestValue);   // istegi gonder
-    return recvJson();          // hemen ardindan cevabi oku ve doner
+JsonValue PythonProcess::request(
+    const JsonValue& requestValue,
+    DWORD timeoutMs
+) {
+    sendJson(requestValue);
+
+    try {
+        std::string line = readLineWithTimeout(timeoutMs);
+
+        if (line.empty()) {
+            throw std::runtime_error(
+                "PythonProcess::request: process'ten cevap gelmedi"
+            );
+        }
+
+        return JsonValue::parse(line);
+    }
+    catch (const std::runtime_error&) {
+        forceStop();
+        throw;
+    }
 }
 
-JsonValue PythonProcess::requestWithProgress(const JsonValue& requestValue,
-                                              const std::function<void(const JsonValue&)>& onProgress) {
-    sendJson(requestValue);   // istegi gonder
+JsonValue PythonProcess::requestWithProgress(
+    const JsonValue& requestValue,
+    const std::function<void(const JsonValue&)>& onProgress,
+    DWORD timeoutMs
+) {
+    sendJson(requestValue);
 
-    while (true) {
-        JsonValue response = recvJson();   // bir satir oku (ya ara ilerleme ya da nihai cevap)
-        std::string status = response.has("status") ? response.at("status").asString() : "";
-        if (status == "progress") {          // ara bildirim: cagirana ilet, okumaya DEVAM et
-            if (onProgress) onProgress(response);
-            continue;
+    try {
+        DWORD startTime = GetTickCount();
+
+        while (true) {
+            DWORD elapsed = GetTickCount() - startTime;
+
+            if (elapsed >= timeoutMs) {
+                throw std::runtime_error(
+                    "PythonProcess::requestWithProgress: timeout"
+                );
+            }
+
+            DWORD remaining = timeoutMs - elapsed;
+
+            std::string line = readLineWithTimeout(remaining);
+
+            if (line.empty()) {
+                throw std::runtime_error(
+                    "PythonProcess::requestWithProgress: process'ten cevap gelmedi"
+                );
+            }
+
+            JsonValue message = JsonValue::parse(line);
+
+            if (message.has("type") &&
+                message.at("type").asString() == "progress") {
+
+                if (onProgress) {
+                    onProgress(message);
+                }
+
+                continue;
+            }
+
+            return message;
         }
-        return response;   // "progress" degilse (ok/error) bu NIHAI cevaptir
     }
+    catch (const std::runtime_error&) {
+        forceStop();
+        throw;
+    }
+}
+
+void PythonProcess::forceStop() {
+    if (!running_) {
+        return;
+    }
+
+    if (processInfo_.hProcess) {
+        TerminateProcess(processInfo_.hProcess, 1);
+        WaitForSingleObject(processInfo_.hProcess, 1000);
+    }
+
+    if (childStdinWrite_) {
+        CloseHandle(childStdinWrite_);
+        childStdinWrite_ = NULL;
+    }
+
+    if (childStdoutRead_) {
+        CloseHandle(childStdoutRead_);
+        childStdoutRead_ = NULL;
+    }
+
+    if (processInfo_.hThread) {
+        CloseHandle(processInfo_.hThread);
+        processInfo_.hThread = NULL;
+    }
+
+    if (processInfo_.hProcess) {
+        CloseHandle(processInfo_.hProcess);
+        processInfo_.hProcess = NULL;
+    }
+
+    ZeroMemory(&processInfo_, sizeof(processInfo_));
+
+    running_ = false;
 }
 
 void PythonProcess::stop() {

@@ -19,7 +19,7 @@
 
 #include <windows.h>   // HANDLE, PROCESS_INFORMATION, CreateProcess vb. Windows API turleri/fonksiyonlari icin
 #include <string>      // std::string icin
-#include <functional>  // requestWithProgress'in callback parametresi icin std::function
+#include <functional>
 #include "json_value.h"   // sendJson/recvJson icin JsonValue turu
 
 class PythonProcess {   // Python dispatcher.py process'ini baslatip pipe uzerinden onunla konusan sinif
@@ -41,23 +41,23 @@ public:
     /* Python'un stdout'undan tek satir okur (karsilik gelen JSON cevabi).
      * Process kapanmissa bos string doner. */
     std::string readLine();   // process'in stdout pipe'indan bir satir okuyup doner
+    std::string readLineWithTimeout(DWORD timeoutMs);
 
     /* Ust seviye yardimcilar: JsonValue gonder / al. */
     void sendJson(const JsonValue& value);   // value.dump() ile metne cevirip sendLine ile gonderir
     JsonValue recvJson();                     // readLine ile bir satir okuyup JsonValue::parse ile ayristirir
 
     /* Tek istek - tek cevap deseni icin kisayol: gonder, hemen cevabi oku. */
-    JsonValue request(const JsonValue& requestValue);   // sendJson + recvJson'i art arda cagiran kisayol
+    JsonValue request(
+        const JsonValue& requestValue,
+        DWORD timeoutMs = 30000
+    );
 
-    /* request()'in "ilerleme bildirimli" hali: bazi bloklar (orn.
-     * mlp_learner, egitim sirasinda her epoch sonunda) nihai cevaptan ONCE
-     * birden fazla ara satir gonderebilir - her biri {"status":"progress",...}
-     * seklinde. Bu satirlari okudukca onProgress cagirilir, "progress"
-     * OLMAYAN ilk satir (ok/error) nihai cevap olarak dogrudan donulur.
-     * Progress hic gonderilmezse (bloklarin cogu) davranis request() ile
-     * AYNIDIR - sadece bir dongu fazladan calisir. */
-    JsonValue requestWithProgress(const JsonValue& requestValue,
-                                   const std::function<void(const JsonValue&)>& onProgress);
+    JsonValue requestWithProgress(
+    const JsonValue& requestValue,
+    const std::function<void(const JsonValue&)>& onProgress,
+    DWORD timeoutMs = 30000
+);
 
     /* stdin'i kapatir (Python'daki "for line in sys.stdin" dongusu EOF
      * gorup dogal olarak biter), process'in kapanmasini bekler, handle'lari
@@ -72,6 +72,7 @@ private:
     HANDLE childStdoutRead_;
     PROCESS_INFORMATION processInfo_;
     bool running_;
+    void forceStop();
 
     /* kopyalanmasin: bir process handle'ini iki nesnenin "sahiplenmesi"
      * anlamsiz ve tehlikeli olur (cift kapama vb.). Kopyalamayi
