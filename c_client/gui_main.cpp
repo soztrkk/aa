@@ -13,6 +13,7 @@
  *   c_client\gui_client.exe
  */
 
+#include "remote_backend.h"
 #include "imgui.h"
 #include "imgui_impl_win32.h"
 #include "imgui_impl_dx11.h"
@@ -21,7 +22,6 @@
 #include <tchar.h>
 #include <string>
 
-#include "python_process.h"
 #include "pipeline_engine.h"
 #include "gui_app.h"
 
@@ -39,20 +39,19 @@ static void CreateRenderTarget();
 static void CleanupRenderTarget();
 static LRESULT WINAPI WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
 
-int main() {
-    /* Python dispatcher.py'yi baslat - AYNI PythonProcess/PipelineEngine,
-     * interactive_main.cpp/main.cpp'nin kullandigi sinifin ta kendisi.
-     * Bu program da MUTLAKA proje KOK dizininden calistirilmali. */
-    PythonProcess proc;
+int main(int argc, char** argv) {
+    std::string serverIp = (argc > 1) ? argv[1] : "127.0.0.1";   // komut satirindan IP al, verilmezse localhost dene
+
+    RemoteBackend backend;
     std::string startError;
-    if (!proc.start("python", "dispatcher.py", startError)) {
-        MessageBoxA(NULL, ("Python baslatilamadi: " + startError +
-                            "\n\nBu programi proje KOK dizininden calistirdigindan emin ol "
-                            "(c_client\\gui_client.exe).").c_str(),
-                    "gui_client - baslatma hatasi", MB_OK | MB_ICONERROR);
+    if (!backend.connectTo(serverIp, 5555, startError)) {
+        MessageBoxA(NULL, ("Sunucuya baglanilamadi (" + serverIp + "): " + startError +
+                            "\n\nsunucu makinede server_main.exe calisiyor mu, "
+                            "firewall 5555 portunu aciyor mu kontrol et.").c_str(),
+                    "gui_client - baglanti hatasi", MB_OK | MB_ICONERROR);
         return 1;
     }
-    PipelineEngine engine(proc);
+    PipelineEngine engine(backend);
     GuiApp app(engine);
 
     // --- ORNEKTEN: pencere olustur ---
@@ -65,7 +64,7 @@ int main() {
     if (!CreateDeviceD3D(hwnd)) {
         CleanupDeviceD3D();
         ::UnregisterClassW(wc.lpszClassName, wc.hInstance);
-        proc.stop();
+        backend.disconnect();
         return 1;
     }
 
@@ -135,7 +134,7 @@ int main() {
     ::DestroyWindow(hwnd);
     ::UnregisterClassW(wc.lpszClassName, wc.hInstance);
 
-    proc.stop();   // dispatcher.py'yi duzgunce kapat (interactive_main.cpp/main.cpp ile ayni desen)
+    backend.disconnect();  // dispatcher.py'yi duzgunce kapat (interactive_main.cpp/main.cpp ile ayni desen)
     return 0;
 }
 

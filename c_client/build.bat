@@ -86,7 +86,7 @@ REM calismasi icin bu bayrak guvenlik payi olarak ekleniyor.
 %GUI_GXX% -std=c++11 -Wall -O2 -pthread -DIMGUI_DEFINE_MATH_OPERATORS ^
     -I third_party/imgui -I third_party/imgui/backends -I third_party/imnodes ^
     json_value.cpp ^
-    python_process.cpp ^
+    remote_backend.cpp ^
     pipeline_engine.cpp ^
     block_specs.cpp ^
     result_display_imgui.cpp ^
@@ -100,8 +100,8 @@ REM calismasi icin bu bayrak guvenlik payi olarak ekleniyor.
     third_party/imgui/backends/imgui_impl_dx11.cpp ^
     third_party/imnodes/imnodes.cpp ^
     -static -static-libgcc -static-libstdc++ ^
-    -ld3d11 -ldxgi -ld3dcompiler -ldwmapi -lgdi32 -o gui_client.exe
-
+    -ld3d11 -ldxgi -ld3dcompiler -ldwmapi -lgdi32 -lws2_32 -o gui_client.exe
+    
 if %ERRORLEVEL% NEQ 0 (
     echo.
     echo DERLEME BASARISIZ: gui_client.exe
