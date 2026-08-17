@@ -24,7 +24,7 @@ static std::string upstreamNodeIdFromRef(const std::string& ref) {
     return ref.substr(0, colon);                          // ':' oncesindeki kismi (node id) doner
 }
 
-PipelineEngine::PipelineEngine(PythonProcess& process) : process_(process) {}   // Python'a mesaj gondermek icin process referansini sakla
+PipelineEngine::PipelineEngine(IBackend& process) : process_(process) {}  // Python'a mesaj gondermek icin process referansini sakla
 
 void PipelineEngine::addNode(const std::string& id, const std::string& block, const JsonValue& params) {
     if (nodes_.find(id) != nodes_.end()) {                                  // ayni id ile daha once eklenmis mi?

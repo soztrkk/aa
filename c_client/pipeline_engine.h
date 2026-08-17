@@ -33,7 +33,7 @@
 #include <set>       // dirty propagation sirasinda "zaten ziyaret edildi" takibi icin std::set
 #include <functional>   // runAll'a verilebilen opsiyonel ProgressCallback icin
 #include "json_value.h"      // params/meta alanlari icin JsonValue
-#include "python_process.h"  // Python'a mesaj gondermek icin PythonProcess
+#include "backend.h"         // Python'a (ya da uzak sunucuya) mesaj gondermek icin IBackend
 
 enum class NodeState { NOT_RUN, UP_TO_DATE, DIRTY, ERROR_STATE };   // bir node'un olabilecegi dort durum
 
@@ -63,7 +63,7 @@ struct Node {
 
 class PipelineEngine {
 public:
-    explicit PipelineEngine(PythonProcess& process);   // Python'a mesaj gonderecek process referansini saklar
+    explicit PipelineEngine(IBackend& process);   // Python'a mesaj gonderecek process referansini saklar
 
     /* --- graph'i kurma --- */
 
@@ -134,7 +134,7 @@ public:
     JsonValue exportCsv(const std::string& ref, const std::string& filePath);
 
 private:
-    PythonProcess& process_;              // Python'a mesaj gondermek icin kullanilan referans
+    IBackend& process_;              // Python'a mesaj gondermek icin kullanilan referans
     std::map<std::string, Node> nodes_;    // node_id -> Node; tum pipeline grafi burada tutulur
 
     void markDirtyRecursive(const std::string& id, std::set<std::string>& visited);   // id ve tum alt bagimlilarini DIRTY yapar (ozyinelemeli)

@@ -21,8 +21,9 @@
 #include <string>      // std::string icin
 #include <functional>  // requestWithProgress'in callback parametresi icin std::function
 #include "json_value.h"   // sendJson/recvJson icin JsonValue turu
+#include "backend.h"       
 
-class PythonProcess {   // Python dispatcher.py process'ini baslatip pipe uzerinden onunla konusan sinif
+class PythonProcess : public IBackend {   // Python dispatcher.py process'ini baslatip pipe uzerinden onunla konusan sinif
 public:
     PythonProcess();    // handle'lari bos/gecersiz degerlerle baslatan kurucu
     ~PythonProcess();    // process hala calisiyorsa stop() cagirip kaynaklari serbest birakan yikici (destructor)
@@ -64,9 +65,8 @@ public:
      * serbest birakir. Destructor da otomatik cagirir, ama pipeline
      * bitince acikca da cagirabilirsin. */
     void stop();
-
-    bool isRunning() const { return running_; }
-
+    bool isRunning() const override { return running_; }
+    
 private:
     HANDLE childStdinWrite_;
     HANDLE childStdoutRead_;
